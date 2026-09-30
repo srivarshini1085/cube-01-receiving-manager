@@ -1,0 +1,120 @@
+{
+  "$schema": "https://cube-buildathon.org/schemas/v2/receiving-evidence-contract.json",
+  "contract_version": "2.0.0",
+  "stage": "01_RECEIVING",
+  "record_id": "RCV-8F4C2A19",
+  "unit_id": "UNIT-0001",
+  "org_id": "org_demo_alpha",
+  "operator_id": "op_dock_lead_01",
+  "captured_at": "2026-09-30T14:30:00.000Z",
+  "completed_at": "2026-09-30T14:30:01.450Z",
+  "po_context": {
+    "po_number": "PO-7000",
+    "po_line": 1,
+    "supplier": "Supplier East (DUMMY)",
+    "sku": "SKU-TOWEL-BLU",
+    "asin": "B0DUMMY600",
+    "product_title": "Cotton Bath Towel",
+    "spec_colour": "blue",
+    "spec_variant": "bath",
+    "spec_components": "towel"
+  },
+  "quantities": {
+    "cartons_ordered": 1,
+    "cartons_received": 1,
+    "units_per_carton_ordered": 24,
+    "units_per_carton_counted": 24,
+    "qty_ordered": 24,
+    "qty_received": 24,
+    "discrepancy_units": 0
+  },
+  "verdict_summary": {
+    "overall_verdict": "PASS",
+    "disposition": "ACCEPTED",
+    "rationale": "All incoming checks verified and matched purchase order specification."
+  },
+  "checks": [
+    {
+      "check_key": "SKU_IDENTITY",
+      "expected": "SKU-TOWEL-BLU",
+      "observed": "SKU-TOWEL-BLU",
+      "verdict": "PASS",
+      "confidence": 0.98,
+      "explanation": "Observed SKU 'SKU-TOWEL-BLU' matches PO line expectation 'SKU-TOWEL-BLU'."
+    },
+    {
+      "check_key": "QUANTITY_MATCH",
+      "expected": "24 units",
+      "observed": "24 units (1 cartons × 24 upc)",
+      "verdict": "PASS",
+      "confidence": 0.99,
+      "explanation": "Received quantity 24 exactly matches ordered quantity 24."
+    },
+    {
+      "check_key": "CARTON_COUNT",
+      "expected": "1 cartons",
+      "observed": "1 cartons",
+      "verdict": "PASS",
+      "confidence": 0.98,
+      "explanation": "Carton count 1 matches PO line expectation."
+    },
+    {
+      "check_key": "UNITS_PER_CARTON",
+      "expected": "24 units/carton",
+      "observed": "24 units/carton",
+      "verdict": "PASS",
+      "confidence": 0.98,
+      "explanation": "Units per carton (24) matches PO packaging spec."
+    },
+    {
+      "check_key": "CARTON_DAMAGE",
+      "expected": "None (sound corrugate)",
+      "observed": "none",
+      "verdict": "PASS",
+      "confidence": 0.94,
+      "explanation": "No visible carton crushing, water damage, or tears detected."
+    },
+    {
+      "check_key": "UNIT_DAMAGE",
+      "expected": "None (unblemished, factory sealed)",
+      "observed": "none",
+      "verdict": "PASS",
+      "confidence": 0.92,
+      "explanation": "No physical unit damage observed."
+    },
+    {
+      "check_key": "VARIANT_MATCH",
+      "expected": "Colour: blue, Variant: bath",
+      "observed": "Colour: blue, Variant: bath",
+      "verdict": "PASS",
+      "confidence": 0.91,
+      "explanation": "Observed color and product variant match PO line spec."
+    },
+    {
+      "check_key": "COMPONENTS_CHECK",
+      "expected": "towel",
+      "observed": "towel",
+      "verdict": "PASS",
+      "confidence": 0.95,
+      "explanation": "All expected components present (towel)."
+    }
+  ],
+  "evidence_hashes": [
+    {
+      "image_type": "carton_exterior",
+      "filename": "correct_carton.jpg",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "image_type": "product",
+      "filename": "correct_unit_blue.jpg",
+      "sha256": "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb"
+    }
+  ],
+  "overrides": [],
+  "cryptographic_integrity": {
+    "hashing_algorithm": "SHA-256",
+    "certificate_sha256": "7a35b1d4c2089f8164b3607a9e3e7f2231c28c89b703e2309f42777174db5b09",
+    "canonical_status": "SEALED"
+  }
+}

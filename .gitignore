@@ -1,9 +1,16 @@
 .env
 .env.*
 !.env.example
+*.db
+*.sqlite
+*.sqlite3
 node_modules/
+dist/
 __pycache__/
 *.pyc
+.pytest_cache/
 .venv/
 venv/
 .DS_Store
+uploads/*
+!uploads/.gitkeep
