@@ -111,9 +111,15 @@ class OperatorOverrideResponse(BaseModel):
 # --- Images ---
 class ReceivingImageResponse(BaseModel):
     id: str
+    inspection_id: Optional[str] = None
     file_reference: str
     image_type: str
     checksum: Optional[str] = None
+    storage_key: Optional[str] = None
+    image_url: Optional[str] = None
+    original_filename: Optional[str] = None
+    content_type: Optional[str] = None
+    size_bytes: Optional[int] = None
     metadata_json: Optional[str] = None
     uploaded_at: datetime
 

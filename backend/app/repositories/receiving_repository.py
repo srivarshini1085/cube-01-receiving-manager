@@ -130,6 +130,11 @@ class ReceivingRepository:
         image_type: str = "other",
         checksum: Optional[str] = None,
         metadata_json: Optional[str] = None,
+        storage_key: Optional[str] = None,
+        image_url: Optional[str] = None,
+        original_filename: Optional[str] = None,
+        content_type: Optional[str] = None,
+        size_bytes: Optional[int] = None,
     ) -> ReceivingImage:
         image = ReceivingImage(
             organization_id=org_id,
@@ -138,6 +143,11 @@ class ReceivingRepository:
             image_type=image_type,
             checksum=checksum,
             metadata_json=metadata_json,
+            storage_key=storage_key,
+            image_url=image_url,
+            original_filename=original_filename,
+            content_type=content_type,
+            size_bytes=size_bytes,
         )
         self.db.add(image)
         self.db.commit()

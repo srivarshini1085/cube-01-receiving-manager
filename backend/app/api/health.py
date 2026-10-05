@@ -7,6 +7,7 @@ router = APIRouter()
 
 
 @router.get("/health", response_model=HealthResponse)
+@router.get("/api/v1/health", response_model=HealthResponse)
 def health():
     db_ok = check_db_connection()
     db_health = DatabaseHealth(status="ok" if db_ok else "error")

@@ -57,6 +57,9 @@ def list_inspections(
     return repo.list_inspections(org_id=org_id, status=status)
 
 
+from app.services.storage_service import storage_provider
+
+
 @router.get("/{inspection_id}", response_model=ReceivingInspectionDetail)
 def get_inspection(
     inspection_id: str,
@@ -82,6 +85,12 @@ def get_inspection(
         "expected_variant": po_line.expected_variant if po_line else None,
         "expected_components": po_line.expected_components if po_line else None,
     }
+
+    # Ensure all images have accessible image_url for browser rendering
+    for img in detail.images:
+        if not img.image_url or not img.image_url.startswith("data:"):
+            img.image_url = f"/api/v1/inspections/{inspection_id}/images/{img.id}/bytes?org_id={org_id}"
+
     return detail
 
 
@@ -98,19 +107,16 @@ async def upload_image(
     if not inspection:
         raise HTTPException(status_code=404, detail="Inspection record not found for this tenant.")
 
-    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-    org_upload_dir = os.path.join(settings.UPLOAD_DIR, org_id)
-    os.makedirs(org_upload_dir, exist_ok=True)
-
     contents = await file.read()
     checksum = hashlib.sha256(contents).hexdigest()
-    
-    file_ext = os.path.splitext(file.filename or "")[1] or ".jpg"
-    safe_filename = f"{inspection_id}_{checksum[:12]}{file_ext}"
-    target_path = os.path.join(org_upload_dir, safe_filename)
 
-    with open(target_path, "wb") as f:
-        f.write(contents)
+    storage_key, target_path, stored_url = storage_provider.save_image(
+        contents=contents,
+        original_filename=file.filename or "uploaded_image.jpg",
+        content_type=file.content_type or "image/jpeg",
+        org_id=org_id,
+        inspection_id=inspection_id,
+    )
 
     image_record = repo.add_image(
         org_id=org_id,
@@ -119,8 +125,17 @@ async def upload_image(
         image_type=image_type,
         checksum=checksum,
         metadata_json=f'{{"filename": "{file.filename}", "size_bytes": {len(contents)}}}',
+        storage_key=storage_key,
+        image_url=stored_url,
+        original_filename=file.filename or "upload.jpg",
+        content_type=file.content_type or "image/jpeg",
+        size_bytes=len(contents),
     )
-    return image_record
+
+    resp = ReceivingImageResponse.model_validate(image_record)
+    if not resp.image_url or not resp.image_url.startswith("data:"):
+        resp.image_url = f"/api/v1/inspections/{inspection_id}/images/{image_record.id}/bytes?org_id={org_id}"
+    return resp
 
 
 @router.get("/{inspection_id}/images/{image_id}/bytes")
@@ -139,10 +154,34 @@ def get_image_file(
     if not image or image.inspection_id != inspection_id:
         raise HTTPException(status_code=404, detail="Image not found or access denied for this tenant.")
 
-    if not os.path.exists(image.file_reference):
-        raise HTTPException(status_code=404, detail="Physical image asset missing on disk.")
+    if image.file_reference and os.path.exists(image.file_reference):
+        return FileResponse(image.file_reference, media_type=image.content_type or "image/jpeg")
 
-    return FileResponse(image.file_reference)
+    # Fallback to storage provider bytes (for serverless/data-uri)
+    img_bytes = storage_provider.get_image_bytes(image.file_reference)
+    if img_bytes:
+        from fastapi.responses import Response
+        return Response(content=img_bytes, media_type=image.content_type or "image/jpeg")
+
+    raise HTTPException(status_code=404, detail="Physical image asset missing on disk.")
+
+
+@router.delete("/{inspection_id}/images/{image_id}")
+def delete_image(
+    inspection_id: str,
+    image_id: str,
+    org_id: str = Depends(get_current_org_id),
+    db: Session = Depends(get_db),
+):
+    """Allows dock operator to remove an uploaded image before or during review."""
+    repo = ReceivingRepository(db)
+    image = repo.get_image(org_id=org_id, image_id=image_id)
+    if not image or image.inspection_id != inspection_id:
+        raise HTTPException(status_code=404, detail="Image not found or access denied for this tenant.")
+
+    db.delete(image)
+    db.commit()
+    return {"status": "deleted", "image_id": image_id}
 
 
 @router.post("/{inspection_id}/analyze", response_model=ReceivingInspectionDetail)

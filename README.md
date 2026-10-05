@@ -1,6 +1,6 @@
 # Cube Buildathon · 01 · Receiving Manager
 
-**Commerce Context stream · Round 2 · Individual Build**
+**Commerce Context stream · Round 3 · Production Rebuild & Verification**
 
 > Five agents, one unit, one record that follows it.
 > A physical product arrives, gets prepped, gets shipped, comes back. At every step a person makes a fast judgment that nobody records. **You build the agent that makes one of those judgments, and leaves proof.**
@@ -12,7 +12,7 @@
 **Candidate & Author:** `srivarshini1085`  
 **Repository Fork:** `https://github.com/srivarshini1085/cube-01-receiving-manager`  
 **Branch:** `srivarshini1085`  
-**Evaluation Status:** Production & Research Grade · 14/14 Automated Tests Passing · 100% Ground-Truth Accuracy
+**Evaluation Status:** Production Grade · 15/15 Automated Tests Passing · 100% Ground-Truth Accuracy · Full Image Upload Lifecycle Verified
 
 ---
 
@@ -95,12 +95,12 @@ Open **`http://localhost:8000`** in your browser. You can:
 - **Inspect Evidence Ledger:** View and download SHA-256 signed cross-pod evidence contracts.
 - **Test Tenancy Isolation:** Switch between `org_demo_alpha` and `org_demo_bravo` to see isolated datasets.
 
-### B. Run Automated Pytest Suite (14 Tests)
+### B. Run Automated Pytest Suite (15 Tests)
 ```bash
 cd backend
 python -m pytest -v
 ```
-All 14 tests across tenancy isolation, batch calls, fail-open resilience, uncertain verdicts, overrides, and red-team attacks execute in ~1.8 seconds.
+All 15 tests across tenancy isolation, batch calls, fail-open resilience, uncertain verdicts, overrides, red-team attacks, and end-to-end image upload persistence execute in ~2.5 seconds.
 
 ### C. Run Headless CLI Agent
 ```bash

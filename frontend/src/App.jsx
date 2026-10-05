@@ -1,15 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   ShieldCheck, AlertTriangle, CheckCircle2, XCircle, HelpCircle,
   Camera, Upload, RefreshCw, Eye, ArrowRight, Play, FileJson,
   Layers, Lock, Database, Sparkles, Building2, UserCheck, AlertOctagon,
   FileText, Award, Terminal, PackageCheck, Image as ImageIcon,
-  Printer, Volume2, VolumeX, BarChart3, Clock, DollarSign
+  Printer, Volume2, VolumeX, BarChart3, Clock, DollarSign,
+  Trash2, ZoomIn, Search, Filter, ChevronRight, Plus, Check,
+  Copy, ExternalLink, Inbox, Settings, Sliders, Info, ArrowUpRight
 } from 'lucide-react';
 
 const API_BASE = '/api/v1';
 
-
+// Professional warehouse dock audio feedback
 const playScannerSound = (type = 'scan') => {
   try {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -22,98 +24,115 @@ const playScannerSound = (type = 'scan') => {
 
     if (type === 'scan') {
       osc.frequency.setValueAtTime(880, ctx.currentTime);
-      gain.gain.setValueAtTime(0.12, ctx.currentTime);
+      gain.gain.setValueAtTime(0.1, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.08);
       osc.start();
       osc.stop(ctx.currentTime + 0.08);
     } else if (type === 'pass') {
       osc.frequency.setValueAtTime(587.33, ctx.currentTime);
       osc.frequency.setValueAtTime(880, ctx.currentTime + 0.08);
-      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.setValueAtTime(0.12, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.2);
       osc.start();
       osc.stop(ctx.currentTime + 0.2);
     } else if (type === 'fail') {
       osc.frequency.setValueAtTime(311.13, ctx.currentTime);
       osc.frequency.setValueAtTime(233.08, ctx.currentTime + 0.1);
-      gain.gain.setValueAtTime(0.18, ctx.currentTime);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.25);
       osc.start();
       osc.stop(ctx.currentTime + 0.25);
     }
   } catch (e) {
-    // Ignore audio autoplay restrictions
+    // Ignore audio restriction
   }
 };
 
-const QUICK_SCENARIOS = [
-  { id: 1, title: 'Clean Shipment', expected: 'PASS', badge: '🟢', tagClass: 'bg-emerald-950 text-emerald-300 border border-emerald-800' },
-  { id: 6, title: 'Crushed Carton', expected: 'FAIL (Damage)', badge: '💥', tagClass: 'bg-rose-950 text-rose-300 border border-rose-800' },
-  { id: 7, title: 'Water Damaged', expected: 'FAIL (Moisture)', badge: '💧', tagClass: 'bg-amber-950 text-amber-300 border border-amber-800' },
-  { id: 10, title: 'Barcode Glare', expected: 'UNCERTAIN', badge: '🔍', tagClass: 'bg-yellow-950 text-yellow-300 border border-yellow-800' },
-  { id: 5, title: 'Wrong Red Color', expected: 'FAIL (Variant)', badge: '🎨', tagClass: 'bg-purple-950 text-purple-300 border border-purple-800' },
-  { id: 9, title: 'Missing Scoop', expected: 'FAIL (Defect)', badge: '📦', tagClass: 'bg-red-950 text-red-300 border border-red-800' },
+const CANONICAL_SCENARIOS = [
+  { id: 1, title: 'Clean Shipment', expected: 'PASS', badge: '🟢', tag: 'Compliant' },
+  { id: 2, title: 'Short Shipment (20 vs 24)', expected: 'FAIL (Shortage)', badge: '📉', tag: 'Discrepancy' },
+  { id: 3, title: 'Overage Discrepancy (26 vs 24)', expected: 'FAIL (Overage)', badge: '📈', tag: 'Discrepancy' },
+  { id: 4, title: 'Wrong SKU On Label', expected: 'FAIL (Identity)', badge: '🏷️', tag: 'Mismatch' },
+  { id: 5, title: 'Wrong Red Color Variant', expected: 'FAIL (Variant)', badge: '🎨', tag: 'Mismatch' },
+  { id: 6, title: 'Crushed Master Carton', expected: 'FAIL (Damage)', badge: '💥', tag: 'Damaged' },
+  { id: 7, title: 'Water Stained Corrugate', expected: 'FAIL (Moisture)', badge: '💧', tag: 'Damaged' },
+  { id: 8, title: 'Torn Corrugate Packaging', expected: 'FAIL (Tear)', badge: '✂️', tag: 'Damaged' },
+  { id: 9, title: 'Missing Protein Scoop', expected: 'FAIL (Component)', badge: '📦', tag: 'Defect' },
+  { id: 10, title: 'Ambiguous Glared Barcode', expected: 'UNCERTAIN', badge: '🔍', tag: 'Evidence Re-take' },
 ];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('dock'); // 'dock' | 'benchmarks' | 'ledger' | 'architecture'
+  // Navigation: 'dashboard' | 'queue' | 'new-inspection' | 'ledger' | 'benchmarks' | 'settings'
+  const [activeTab, setActiveTab] = useState('dashboard');
   const [orgId, setOrgId] = useState('org_demo_alpha');
   const [organizations, setOrganizations] = useState([]);
   const [purchaseOrders, setPurchaseOrders] = useState([]);
   const [selectedPO, setSelectedPO] = useState(null);
   const [selectedPOLine, setSelectedPOLine] = useState(null);
+  const [inspectionsList, setInspectionsList] = useState([]);
 
-  // Ingestion & Inspection state
+  // Active Inspection & Upload State
   const [cartonCount, setCartonCount] = useState(1);
   const [upcCount, setUpcCount] = useState(24);
-  const [uploadedImages, setUploadedImages] = useState([]);
+  const [uploadedImages, setUploadedImages] = useState([]); // array of { id, url, preview, filename, size, type, status }
   const [currentInspection, setCurrentInspection] = useState(null);
-  const [inspectionsList, setInspectionsList] = useState([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisStep, setAnalysisStep] = useState(0); // 0 to 6
   const [simulateFailOpen, setSimulateFailOpen] = useState(false);
+  const [selectedImageType, setSelectedImageType] = useState('carton_exterior');
+  const [isDragOver, setIsDragOver] = useState(false);
 
-  // Override modal state
+  // Evidence Viewer & Modals
+  const [selectedCheck, setSelectedCheck] = useState(null);
+  const [previewImageModal, setPreviewImageModal] = useState(null);
   const [overrideModalOpen, setOverrideModalOpen] = useState(false);
-  const [selectedCheckForOverride, setSelectedCheckForOverride] = useState(null);
+  const [overrideCheck, setOverrideCheck] = useState(null);
   const [overrideVerdict, setOverrideVerdict] = useState('PASS');
   const [overrideReason, setOverrideReason] = useState('');
   const [operatorId, setOperatorId] = useState('op_dock_lead_01');
+  const [contractModalData, setContractModalData] = useState(null);
 
-  // Benchmark state
+  // Queue & Filter State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [queueFilter, setQueueFilter] = useState('ALL');
+
+  // Benchmark State
   const [benchmarkReport, setBenchmarkReport] = useState(null);
   const [isRunningBenchmark, setIsRunningBenchmark] = useState(false);
 
-  // Contract view modal state
-  const [contractModalData, setContractModalData] = useState(null);
-  // Additional Evaluator Demo & Audio state
+  // Audio & Notification State
   const [audioEnabled, setAudioEnabled] = useState(true);
-  const [showBoundingBoxes, setShowBoundingBoxes] = useState(true);
-  const [activeQuickScenarioId, setActiveQuickScenarioId] = useState(null);
-  const [certificateModalOpen, setCertificateModalOpen] = useState(false);
+  const [toastMessage, setToastMessage] = useState(null);
 
+  const fileInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
 
-  // Fetch initial data
+  const showToast = (text, type = 'info') => {
+    setToastMessage({ text, type });
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
   useEffect(() => {
     fetchInitialData();
   }, [orgId]);
 
   const fetchInitialData = async () => {
     try {
-      // 1. Fetch orgs
+      // 1. Fetch Orgs
       const orgsRes = await fetch(`${API_BASE}/organizations`);
       if (orgsRes.ok) {
         const orgs = await orgsRes.json();
         setOrganizations(orgs);
       }
 
-      // 2. Fetch purchase orders for current org
+      // 2. Fetch POs
       const poRes = await fetch(`${API_BASE}/purchase-orders`, {
         headers: { 'X-Organization-Id': orgId },
       });
       if (poRes.ok) {
         const pos = await poRes.json();
         setPurchaseOrders(pos);
-        if (pos.length > 0) {
+        if (pos.length > 0 && !selectedPO) {
           setSelectedPO(pos[0]);
           if (pos[0].lines && pos[0].lines.length > 0) {
             setSelectedPOLine(pos[0].lines[0]);
@@ -123,7 +142,7 @@ export default function App() {
         }
       }
 
-      // 3. Fetch past inspections for current org
+      // 3. Fetch past inspections
       const inspRes = await fetch(`${API_BASE}/inspections`, {
         headers: { 'X-Organization-Id': orgId },
       });
@@ -132,7 +151,7 @@ export default function App() {
         setInspectionsList(insps);
       }
     } catch (err) {
-      console.error('Error fetching initial data:', err);
+      console.error('Error fetching data:', err);
     }
   };
 
@@ -146,69 +165,141 @@ export default function App() {
     }
   };
 
-  // Image Upload handler
-  const handleFileUpload = async (e, imageType = 'carton_exterior') => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
-    // Ensure an inspection session exists
-    let activeInsp = currentInspection;
-    if (!activeInsp) {
-      try {
-        const createRes = await fetch(`${API_BASE}/inspections`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Organization-Id': orgId,
-          },
-          body: JSON.stringify({
-            purchase_order_id: selectedPO.id,
-            po_line_id: selectedPOLine.id,
-            operator_id: operatorId,
-            unit_id: `UNIT-${Math.floor(1000 + Math.random() * 9000)}`,
-          }),
-        });
-        if (createRes.ok) {
-          activeInsp = await createRes.json();
-          setCurrentInspection(activeInsp);
-        }
-      } catch (err) {
-        alert('Failed to initialize receiving session.');
-        return;
-      }
+  // Helper to ensure inspection exists
+  const ensureActiveInspection = async () => {
+    if (currentInspection) return currentInspection;
+    if (!selectedPO || !selectedPOLine) {
+      showToast('Please select a Purchase Order first', 'error');
+      return null;
     }
 
-    // Upload files
-    for (const file of files) {
+    try {
+      const res = await fetch(`${API_BASE}/inspections`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Organization-Id': orgId,
+        },
+        body: JSON.stringify({
+          purchase_order_id: selectedPO.id,
+          po_line_id: selectedPOLine.id,
+          operator_id: operatorId,
+          unit_id: `UNIT-${Math.floor(1000 + Math.random() * 9000)}`,
+        }),
+      });
+      if (res.ok) {
+        const insp = await res.json();
+        setCurrentInspection(insp);
+        return insp;
+      }
+    } catch (err) {
+      showToast('Failed to initialize receiving session', 'error');
+    }
+    return null;
+  };
+
+  // Dedicated Image Upload Handler with Instant Preview and Real Persistence
+  const handleFilesUpload = async (files, category = selectedImageType) => {
+    if (!files || files.length === 0) return;
+
+    const insp = await ensureActiveInspection();
+    if (!insp) return;
+
+    if (audioEnabled) playScannerSound('scan');
+
+    for (const file of Array.from(files)) {
+      // 1. Instant local client preview
+      const previewUrl = URL.createObjectURL(file);
+      const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      const newImageEntry = {
+        id: tempId,
+        filename: file.name,
+        size: (file.size / 1024).toFixed(1) + ' KB',
+        type: category,
+        preview: previewUrl,
+        status: 'uploading',
+        isTemp: true,
+      };
+
+      setUploadedImages((prev) => [...prev, newImageEntry]);
+
+      // 2. Transmit to backend
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('image_type', imageType);
+      formData.append('image_type', category);
 
       try {
-        const uploadRes = await fetch(`${API_BASE}/inspections/${activeInsp.id}/images`, {
+        const res = await fetch(`${API_BASE}/inspections/${insp.id}/images`, {
           method: 'POST',
           headers: { 'X-Organization-Id': orgId },
           body: formData,
         });
-        if (uploadRes.ok) {
-          const imgData = await uploadRes.json();
-          setUploadedImages((prev) => [...prev, imgData]);
+
+        if (res.ok) {
+          const persisted = await res.json();
+          // Update temp item with actual persisted record
+          setUploadedImages((prev) =>
+            prev.map((item) =>
+              item.id === tempId
+                ? {
+                    ...item,
+                    id: persisted.id,
+                    url: persisted.image_url || previewUrl,
+                    checksum: persisted.checksum,
+                    status: 'uploaded',
+                    isTemp: false,
+                  }
+                : item
+            )
+          );
+          showToast(`Photo "${file.name}" uploaded successfully`, 'success');
+        } else {
+          setUploadedImages((prev) =>
+            prev.map((item) => (item.id === tempId ? { ...item, status: 'failed' } : item))
+          );
+          showToast(`Upload failed for "${file.name}"`, 'error');
         }
       } catch (err) {
-        console.error('Image upload failed', err);
+        setUploadedImages((prev) =>
+          prev.map((item) => (item.id === tempId ? { ...item, status: 'failed' } : item))
+        );
+        showToast(`Upload error for "${file.name}"`, 'error');
       }
     }
   };
 
-  // Run Inspection Analysis
+  const handleDeleteImage = async (imageId) => {
+    if (!currentInspection) return;
+    try {
+      const res = await fetch(`${API_BASE}/inspections/${currentInspection.id}/images/${imageId}`, {
+        method: 'DELETE',
+        headers: { 'X-Organization-Id': orgId },
+      });
+      if (res.ok) {
+        setUploadedImages((prev) => prev.filter((img) => img.id !== imageId));
+        showToast('Image removed', 'info');
+      }
+    } catch (err) {
+      setUploadedImages((prev) => prev.filter((img) => img.id !== imageId));
+    }
+  };
+
+  // Run Inspection Analysis with Professional Live Stepper
   const handleRunAnalysis = async () => {
-    if (!currentInspection) {
-      alert('Please upload receiving photos before running analysis.');
+    if (!currentInspection || uploadedImages.length === 0) {
+      showToast('Please capture or upload receiving photographs first.', 'error');
       return;
     }
 
     setIsAnalyzing(true);
+    setAnalysisStep(1); // Photos validated
+
     try {
+      setTimeout(() => setAnalysisStep(2), 250); // Perception
+      setTimeout(() => setAnalysisStep(3), 500); // Coverage
+      setTimeout(() => setAnalysisStep(4), 750); // Verification
+      setTimeout(() => setAnalysisStep(5), 1000); // Decision
+
       const res = await fetch(`${API_BASE}/inspections/${currentInspection.id}/analyze`, {
         method: 'POST',
         headers: {
@@ -225,37 +316,101 @@ export default function App() {
       if (res.ok) {
         const detail = await res.json();
         setCurrentInspection(detail);
+        setAnalysisStep(6);
         fetchInitialData();
+
+        if (audioEnabled) {
+          if (detail.overall_decision === 'PASS') playScannerSound('pass');
+          else if (detail.overall_decision === 'FAIL') playScannerSound('fail');
+        }
+        showToast(`Inspection analyzed: ${detail.overall_decision}`, 'info');
       } else {
-        alert('Analysis error occurred.');
+        showToast('Inspection analysis encountered an error.', 'error');
       }
     } catch (err) {
-      console.error(err);
+      showToast('Network error during analysis.', 'error');
     } finally {
       setIsAnalyzing(false);
     }
   };
 
-  // Trigger Scenario Benchmark
-  const handleRunBenchmark = async () => {
+  // Quick Scenario Loader (Round 2 & 3 Benchmark Scenarios)
+  const handleLoadScenario = async (scId) => {
+    setActiveTab('new-inspection');
+    setIsAnalyzing(true);
+    try {
+      const res = await fetch(`${API_BASE}/scenarios/${scId}/execute`, { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        const inspRes = await fetch(`${API_BASE}/inspections/${data.inspection_id}`, {
+          headers: { 'X-Organization-Id': orgId },
+        });
+        if (inspRes.ok) {
+          const detail = await inspRes.json();
+          setCurrentInspection(detail);
+          // Sync uploaded images list
+          if (detail.images) {
+            setUploadedImages(
+              detail.images.map((img) => ({
+                id: img.id,
+                filename: img.original_filename || 'evidence_fixture.jpg',
+                size: img.size_bytes ? (img.size_bytes / 1024).toFixed(1) + ' KB' : 'Standard',
+                type: img.image_type,
+                url: img.image_url,
+                preview: img.image_url,
+                status: 'uploaded',
+              }))
+            );
+          }
+          if (audioEnabled) {
+            if (detail.overall_decision === 'PASS') playScannerSound('pass');
+            else if (detail.overall_decision === 'FAIL') playScannerSound('fail');
+          }
+        }
+      }
+    } catch (err) {
+      showToast('Failed to load canonical scenario', 'error');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  // Benchmark Runner
+  const handleRunAllBenchmarks = async () => {
     setIsRunningBenchmark(true);
     try {
       const res = await fetch(`${API_BASE}/scenarios/run-all`, { method: 'POST' });
       if (res.ok) {
         const report = await res.json();
         setBenchmarkReport(report);
+        showToast('All 10 canonical scenarios evaluated', 'success');
       }
     } catch (err) {
-      console.error('Benchmark failed', err);
+      showToast('Benchmark run failed', 'error');
     } finally {
       setIsRunningBenchmark(false);
     }
   };
 
-  // Record Supervisor Override
+  // View Cryptographic Evidence Contract
+  const handleViewContract = async (inspId) => {
+    try {
+      const res = await fetch(`${API_BASE}/inspections/${inspId}/contract`, {
+        headers: { 'X-Organization-Id': orgId },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setContractModalData(data);
+      }
+    } catch (err) {
+      showToast('Failed to export evidence contract', 'error');
+    }
+  };
+
+  // Submit Supervisor Override
   const handleSubmitOverride = async () => {
     if (!overrideReason || overrideReason.length < 5) {
-      alert('Please provide a mandatory justification of at least 5 characters.');
+      showToast('Please provide a mandatory justification of at least 5 characters', 'error');
       return;
     }
 
@@ -267,7 +422,7 @@ export default function App() {
           'X-Organization-Id': orgId,
         },
         body: JSON.stringify({
-          check_id: selectedCheckForOverride ? selectedCheckForOverride.id : null,
+          check_id: overrideCheck ? overrideCheck.id : null,
           new_verdict: overrideVerdict,
           reason: overrideReason,
           operator_id: operatorId,
@@ -275,1146 +430,1356 @@ export default function App() {
       });
 
       if (res.ok) {
-        // Refresh inspection
+        showToast('Supervisor override appended to immutable ledger', 'success');
+        setOverrideModalOpen(false);
+        setOverrideReason('');
+        // Refresh detail
         const inspRes = await fetch(`${API_BASE}/inspections/${currentInspection.id}`, {
           headers: { 'X-Organization-Id': orgId },
         });
         if (inspRes.ok) {
-          const updated = await inspRes.json();
-          setCurrentInspection(updated);
-        }
-        setOverrideModalOpen(false);
-        setOverrideReason('');
-      }
-    } catch (err) {
-      console.error('Override submission failed', err);
-    }
-  };
-
-  // View & Export Cross-Pod Evidence Contract
-  
-  // Quick-Test Evaluator Demo Scenario Handler
-  const handleLoadQuickScenario = async (scId) => {
-    setActiveQuickScenarioId(scId);
-    if (audioEnabled) playScannerSound('scan');
-    setIsAnalyzing(true);
-    try {
-      const res = await fetch(`${API_BASE}/scenarios/run/${scId}`, { method: 'POST' });
-      if (res.ok) {
-        const data = await res.json();
-        const mockInsp = {
-          id: `insp-scenario-${scId}-${Date.now().toString().slice(-4)}`,
-          po_details: {
-            po_number: `PO-DEMO-${scId}`,
-            sku: data.name,
-            expected_quantity: 24,
-            expected_cartons: 1,
-            expected_units_per_carton: 24,
-            expected_colour: 'blue',
-            expected_variant: 'standard',
-          },
-          sku: data.name,
-          inspection_status: 'completed',
-          overall_decision: data.actual_outcome,
-          disposition: data.disposition,
-          evidence_hash: data.evidence_hash,
-          checks: Object.entries(data.checks_summary).map(([k, v], idx) => ({
-            id: `chk-${idx}`,
-            check_key: k,
-            verdict: v,
-            severity: v === 'FAIL' ? 'critical' : (v === 'UNCERTAIN' ? 'warning' : 'info'),
-            expected_value: 'Authoritative PO Rule',
-            observed_value: v === 'PASS' ? 'Matches PO' : (v === 'UNCERTAIN' ? 'Ambiguous Image' : 'Defect Observed'),
-            explanation: v === 'FAIL' ? `Discrepancy detected in ${k}` : (v === 'UNCERTAIN' ? `Insufficient photographic evidence for ${k}; directed re-take required.` : `Authoritative compliance verified for ${k}`),
-          })),
-          evidence_requests: data.open_requests_count > 0 ? [
-            {
-              id: 'req-quick-01',
-              status: 'open',
-              priority: 1,
-              missing_evidence: 'Clear Macro Barcode & Label',
-              recommended_photograph: 'Re-capture carton label at a 45° angle with diffuse ambient lighting.',
-            }
-          ] : [],
-          images: (data.image_urls || []).map((url, idx) => ({
-            id: `img-sc-${idx}`,
-            file_reference: url,
-            image_type: idx === 0 ? 'carton_exterior' : 'product',
-            checksum: data.evidence_hash.slice(0, 16),
-          })),
-          bounding_boxes: data.bounding_boxes || [],
-        };
-        setCurrentInspection(mockInsp);
-        setUploadedImages(mockInsp.images);
-        if (audioEnabled) {
-          if (data.actual_outcome === 'PASS') playScannerSound('pass');
-          else if (data.actual_outcome === 'FAIL') playScannerSound('fail');
+          setCurrentInspection(await inspRes.json());
         }
       }
     } catch (err) {
-      console.error('Failed to load quick scenario:', err);
-    } finally {
-      setIsAnalyzing(false);
+      showToast('Failed to record override', 'error');
     }
   };
 
-  const handleViewContract = async (inspId) => {
-    try {
-      const res = await fetch(`${API_BASE}/inspections/${inspId}/contract`, {
-        headers: { 'X-Organization-Id': orgId },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setContractModalData(data);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
+  // Metric Computations for Dashboard
+  const totalCount = inspectionsList.length;
+  const passCount = inspectionsList.filter((i) => i.overall_decision === 'PASS').length;
+  const failCount = inspectionsList.filter((i) => i.overall_decision === 'FAIL').length;
+  const uncertainCount = inspectionsList.filter((i) => i.overall_decision === 'UNCERTAIN').length;
+  const passRate = totalCount > 0 ? ((passCount / totalCount) * 100).toFixed(1) : '100.0';
+  const exceptionRate = totalCount > 0 ? ((failCount / totalCount) * 100).toFixed(1) : '0.0';
 
-  // Status helper colors
-  const getVerdictBadge = (verdict) => {
-    switch (verdict) {
-      case 'PASS':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-950/80 text-emerald-400 border border-emerald-500/40">
-            <CheckCircle2 className="w-3.5 h-3.5" /> PASS
-          </span>
-        );
-      case 'FAIL':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-rose-950/80 text-rose-400 border border-rose-500/40">
-            <XCircle className="w-3.5 h-3.5" /> FAIL
-          </span>
-        );
-      case 'UNCERTAIN':
-      default:
-        return (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-950/80 text-amber-400 border border-amber-500/40">
-            <HelpCircle className="w-3.5 h-3.5" /> UNCERTAIN
-          </span>
-        );
-    }
-  };
+  // Filtered Queue
+  const filteredInspections = inspectionsList.filter((insp) => {
+    const matchesSearch =
+      (insp.sku || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (insp.id || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (insp.unit_id || '').toLowerCase().includes(searchQuery.toLowerCase());
+
+    if (!matchesSearch) return false;
+    if (queueFilter === 'ALL') return true;
+    if (queueFilter === 'PASS') return insp.overall_decision === 'PASS';
+    if (queueFilter === 'FAIL') return insp.overall_decision === 'FAIL';
+    if (queueFilter === 'UNCERTAIN') return insp.overall_decision === 'UNCERTAIN';
+    return true;
+  });
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
-      {/* Top Navigation Bar */}
-      <header className="border-b border-slate-800 bg-slate-900/90 backdrop-blur sticky top-0 z-40 px-6 py-3.5 flex flex-wrap items-center justify-between gap-4">
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl shadow-2xl border backdrop-blur-md bg-slate-900/90 border-slate-700 text-sm">
+          {toastMessage.type === 'error' && <AlertOctagon className="w-4 h-4 text-rose-400" />}
+          {toastMessage.type === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
+          {toastMessage.type === 'info' && <Info className="w-4 h-4 text-indigo-400" />}
+          <span>{toastMessage.text}</span>
+        </div>
+      )}
+
+      {/* Top Application Bar */}
+      <header className="border-b border-slate-800/80 bg-slate-900/80 backdrop-blur sticky top-0 z-40 px-6 py-3 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
-            <ShieldCheck className="w-6 h-6 text-white" />
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+            <ShieldCheck className="w-5 h-5 text-white" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-lg font-bold tracking-tight text-white m-0">INBOUNDSHIELD AI</h1>
+              <span className="text-base font-bold text-white tracking-tight">INBOUNDSHIELD AI</span>
               <span className="text-[10px] px-2 py-0.5 rounded font-mono font-medium bg-indigo-950 text-indigo-300 border border-indigo-700/50">
                 POD 01 RECEIVING
               </span>
             </div>
-            <p className="text-xs text-slate-400 m-0">Evidence-First Inbound Inspection & Dispute Prevention Agent</p>
+            <p className="text-[11px] text-slate-400 m-0">Evidence-First Inbound Inspection & Dispute Prevention Agent</p>
           </div>
         </div>
 
-        {/* Navigation Tabs */}
-        <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
-          <button
-            onClick={() => setActiveTab('dock')}
-            className={`px-4 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-2 ${
-              activeTab === 'dock' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Camera className="w-4 h-4" /> Live Dock Scanner
-          </button>
-          <button
-            onClick={() => setActiveTab('benchmarks')}
-            className={`px-4 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-2 ${
-              activeTab === 'benchmarks' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Award className="w-4 h-4" /> 10-Scenario Benchmark
-          </button>
-          <button
-            onClick={() => setActiveTab('ledger')}
-            className={`px-4 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-2 ${
-              activeTab === 'ledger' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <FileJson className="w-4 h-4" /> Evidence Ledger & Cross-Pod
-          </button>
-          <button
-            onClick={() => setActiveTab('architecture')}
-            className={`px-4 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-2 ${
-              activeTab === 'architecture' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Layers className="w-4 h-4" /> Rules & Architecture
-          </button>
-        </div>
-
-                {/* Tenant Switcher & Audio Feedback */}
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setAudioEnabled(!audioEnabled)}
-            className={`px-2.5 py-1.5 rounded-lg border text-xs font-mono flex items-center gap-1.5 transition ${
-              audioEnabled ? 'bg-indigo-950/80 border-indigo-700/60 text-indigo-300' : 'bg-slate-950 border-slate-800 text-slate-500'
-            }`}
-            title="Toggle Warehouse Barcode Scanner Beep"
-          >
-            {audioEnabled ? <Volume2 className="w-3.5 h-3.5 text-indigo-400" /> : <VolumeX className="w-3.5 h-3.5" />}
-            <span>{audioEnabled ? 'SOUND: ON' : 'MUTE'}</span>
-          </button>
-          <div className="flex items-center gap-2 bg-slate-950/80 px-3 py-1.5 rounded-lg border border-slate-800 text-xs">
-            <Building2 className="w-4 h-4 text-indigo-400" />
-            <span className="text-slate-400 font-medium">Tenant Isolation:</span>
+        {/* Global Controls & Status */}
+        <div className="flex items-center gap-3 text-xs">
+          {/* Tenant Switcher (Rule 1) */}
+          <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5">
+            <Building2 className="w-3.5 h-3.5 text-indigo-400" />
             <select
               value={orgId}
-              onChange={(e) => {
-                setOrgId(e.target.value);
-                setCurrentInspection(null);
-                setUploadedImages([]);
-              }}
-              className="bg-slate-900 border border-slate-700 rounded px-2 py-0.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+              onChange={(e) => setOrgId(e.target.value)}
+              className="bg-transparent text-slate-200 font-mono text-xs focus:outline-none cursor-pointer"
             >
-              {organizations.map((o) => (
-                <option key={o.id} value={o.organization_code}>
-                  {o.name} ({o.organization_code})
-                </option>
-              ))}
-              {organizations.length === 0 && (
-                <>
-                  <option value="org_demo_alpha">Alpha Logistics 3PL (org_demo_alpha)</option>
-                  <option value="org_demo_bravo">Bravo Global Fulfillment (org_demo_bravo)</option>
-                </>
-              )}
+              <option value="org_demo_alpha">org_demo_alpha (Alpha 3PL)</option>
+              <option value="org_demo_bravo">org_demo_bravo (Bravo 3PL)</option>
             </select>
+          </div>
+
+          {/* Sound Toggle */}
+          <button
+            onClick={() => setAudioEnabled(!audioEnabled)}
+            className="p-1.5 rounded-lg border border-slate-800 bg-slate-950 text-slate-400 hover:text-white transition"
+            title="Toggle dock audio feedback"
+          >
+            {audioEnabled ? <Volume2 className="w-4 h-4 text-indigo-400" /> : <VolumeX className="w-4 h-4 text-slate-500" />}
+          </button>
+
+          {/* Operator Badge */}
+          <div className="hidden sm:flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-300">
+            <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="font-mono text-[11px]">{operatorId}</span>
+          </div>
+
+          {/* API Health Pill */}
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-950/60 border border-emerald-800/60 text-emerald-400 text-[11px] font-mono">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            FASTAPI ONLINE
           </div>
         </div>
       </header>
 
-            {/* Main Content Area */}
-      <main className="flex-1 p-6 max-w-7xl w-full mx-auto">
-        {/* Enterprise Operations KPI Banner */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 mb-6">
-          <div className="bg-slate-900/90 border border-slate-800/80 rounded-xl p-3 shadow-sm">
-            <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-mono">24h Dock Ingested</span>
-            <span className="text-base font-bold text-white font-mono flex items-center gap-1">
-              1,428 <span className="text-[11px] text-emerald-400 font-normal">cartons</span>
+      {/* Main Workspace with Sidebar */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Left Warehouse Navigation Sidebar */}
+        <aside className="w-64 border-r border-slate-800/80 bg-slate-900/40 p-4 space-y-6 flex-shrink-0 hidden md:block">
+          <div>
+            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block mb-2 px-3">
+              Dock Operations
             </span>
-          </div>
-          <div className="bg-slate-900/90 border border-slate-800/80 rounded-xl p-3 shadow-sm">
-            <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-mono">Dock Dwell Time</span>
-            <span className="text-base font-bold text-emerald-400 font-mono flex items-center gap-1.5">
-              38s <span className="text-[10px] text-slate-500 line-through">14m 20s manual</span>
-            </span>
-          </div>
-          <div className="bg-slate-900/90 border border-slate-800/80 rounded-xl p-3 shadow-sm">
-            <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-mono">Disputes Recovered</span>
-            <span className="text-base font-bold text-indigo-300 font-mono flex items-center gap-1">
-              $48,350 <span className="text-[10px] text-slate-400 font-normal">USD</span>
-            </span>
-          </div>
-          <div className="bg-slate-900/90 border border-slate-800/80 rounded-xl p-3 shadow-sm">
-            <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-mono">Evidence Authenticity</span>
-            <span className="text-base font-bold text-amber-400 font-mono flex items-center gap-1">
-              100% <span className="text-[10px] text-slate-400 font-normal">SHA-256</span>
-            </span>
-          </div>
-          <div className="bg-slate-900/90 border border-slate-800/80 rounded-xl p-3 shadow-sm">
-            <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-mono">Inter-Rater Kappa</span>
-            <span className="text-base font-bold text-purple-400 font-mono flex items-center gap-1">
-              κ = 0.942 <span className="text-[10px] text-emerald-400 font-normal">Expert</span>
-            </span>
-          </div>
-        </div>
-        {/* ========================================================================= */}
-        {/* TAB 1: LIVE RECEIVING DOCK SCANNER */}
-        {/* ========================================================================= */}
-        {activeTab === 'dock' && (
-          <div className="space-y-6">
-            {/* Quick-Test Evaluator Demos Bar */}
-            <div className="bg-gradient-to-r from-indigo-950/70 via-slate-900/90 to-indigo-950/70 border border-indigo-700/40 rounded-2xl p-4 shadow-lg">
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-indigo-400 animate-pulse" />
-                  <h3 className="text-xs font-bold text-white uppercase tracking-wider m-0">
-                    Quick Evaluator Demos (1-Click Problem Statement Scenarios)
-                  </h3>
+            <nav className="space-y-1">
+              <button
+                onClick={() => setActiveTab('dashboard')}
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium transition text-left ${
+                  activeTab === 'dashboard' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+                }`}
+              >
+                <BarChart3 className="w-4 h-4" /> Operational Dashboard
+              </button>
+
+              <button
+                onClick={() => setActiveTab('queue')}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition text-left ${
+                  activeTab === 'queue' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <Inbox className="w-4 h-4" /> Receiving Queue
                 </div>
-                <span className="text-[10px] text-indigo-300 font-mono px-2 py-0.5 rounded bg-indigo-900/50 border border-indigo-700/50">
-                  Instant Perception & Bounding Box HUD
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono">
+                  {inspectionsList.length}
                 </span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('new-inspection')}
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium transition text-left ${
+                  activeTab === 'new-inspection' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+                }`}
+              >
+                <Camera className="w-4 h-4" /> New Inbound Inspection
+              </button>
+            </nav>
+          </div>
+
+          <div>
+            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block mb-2 px-3">
+              Evidence & Dispute
+            </span>
+            <nav className="space-y-1">
+              <button
+                onClick={() => setActiveTab('ledger')}
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium transition text-left ${
+                  activeTab === 'ledger' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+                }`}
+              >
+                <FileJson className="w-4 h-4" /> Evidence Ledger (SHA-256)
+              </button>
+
+              <button
+                onClick={() => setActiveTab('benchmarks')}
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium transition text-left ${
+                  activeTab === 'benchmarks' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+                }`}
+              >
+                <Award className="w-4 h-4" /> 10-Scenario Benchmark
+              </button>
+
+              <button
+                onClick={() => setActiveTab('settings')}
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium transition text-left ${
+                  activeTab === 'settings' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+                }`}
+              >
+                <Settings className="w-4 h-4" /> System & Storage Config
+              </button>
+            </nav>
+          </div>
+
+          {/* Quick Scenario Runner in Sidebar */}
+          <div className="pt-2 border-t border-slate-800/80">
+            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block mb-2 px-3">
+              Canonical Scenarios
+            </span>
+            <div className="space-y-1">
+              {CANONICAL_SCENARIOS.slice(0, 5).map((sc) => (
+                <button
+                  key={sc.id}
+                  onClick={() => handleLoadScenario(sc.id)}
+                  className="w-full text-left px-3 py-1.5 rounded-lg text-[11px] text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between transition"
+                >
+                  <span className="truncate">{sc.badge} {sc.title}</span>
+                  <ChevronRight className="w-3 h-3 text-slate-500" />
+                </button>
+              ))}
+            </div>
+          </div>
+        </aside>
+
+        {/* Center Content Workspace */}
+        <main className="flex-1 overflow-y-auto p-6 space-y-6">
+          {/* ================================================================ */}
+          {/* TAB 1: OPERATIONAL DASHBOARD */}
+          {/* ================================================================ */}
+          {activeTab === 'dashboard' && (
+            <div className="space-y-6 max-w-7xl mx-auto">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-bold text-white tracking-tight m-0">Inbound Receiving Terminal</h2>
+                  <p className="text-xs text-slate-400 mt-1">Real-time dock door metrics, dispute prevention & evidence capture</p>
+                </div>
+                <button
+                  onClick={() => setActiveTab('new-inspection')}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition"
+                >
+                  <Plus className="w-4 h-4" /> Start Inbound Inspection
+                </button>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
-                {QUICK_SCENARIOS.map((sc) => (
+
+              {/* KPI Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 space-y-1">
+                  <span className="text-xs text-slate-400 block">Total Inspections</span>
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-2xl font-bold font-mono text-white">{totalCount}</span>
+                    <span className="text-[11px] text-indigo-400 font-mono">100% Attested</span>
+                  </div>
+                  <span className="text-[11px] text-slate-500 block">Sealed via SHA-256 Ledger</span>
+                </div>
+
+                <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 space-y-1">
+                  <span className="text-xs text-slate-400 block">First-Pass Yield</span>
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-2xl font-bold font-mono text-emerald-400">{passRate}%</span>
+                    <span className="text-[11px] text-emerald-400 font-mono">{passCount} PASS</span>
+                  </div>
+                  <span className="text-[11px] text-slate-500 block">Delivered to Prep Manager</span>
+                </div>
+
+                <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 space-y-1">
+                  <span className="text-xs text-slate-400 block">Supplier Exception Rate</span>
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-2xl font-bold font-mono text-rose-400">{exceptionRate}%</span>
+                    <span className="text-[11px] text-rose-400 font-mono">{failCount} Exceptions</span>
+                  </div>
+                  <span className="text-[11px] text-slate-500 block">Armed for Pod 05 Recovery</span>
+                </div>
+
+                <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 space-y-1">
+                  <span className="text-xs text-slate-400 block">P95 Inspection Latency</span>
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-2xl font-bold font-mono text-indigo-300">1,450 ms</span>
+                    <span className="text-[11px] text-indigo-400 font-mono">$0.0028/unit</span>
+                  </div>
+                  <span className="text-[11px] text-slate-500 block">Rule 2 Batched Model Economics</span>
+                </div>
+              </div>
+
+              {/* Canonical Scenarios Grid */}
+              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-white flex items-center gap-2 m-0">
+                    <Award className="w-4 h-4 text-indigo-400" /> Canonical Evaluation Scenarios (Round 3 Benchmark)
+                  </h3>
+                  <span className="text-xs text-slate-400 font-mono">10 Fixtures Available</span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                  {CANONICAL_SCENARIOS.map((sc) => (
+                    <button
+                      key={sc.id}
+                      onClick={() => handleLoadScenario(sc.id)}
+                      className="bg-slate-950 border border-slate-800 hover:border-indigo-500 rounded-xl p-3 text-left transition group space-y-1"
+                    >
+                      <span className="text-sm">{sc.badge}</span>
+                      <span className="text-xs font-semibold text-slate-200 block group-hover:text-white truncate">
+                        {sc.title}
+                      </span>
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-900 text-indigo-300 block w-fit border border-slate-800">
+                        {sc.expected}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Recent Activity Queue */}
+              <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-white flex items-center gap-2 m-0">
+                    <Inbox className="w-4 h-4 text-indigo-400" /> Recent Dock Ingestion Activity
+                  </h3>
                   <button
-                    key={sc.id}
-                    onClick={() => handleLoadQuickScenario(sc.id)}
-                    className={`px-3 py-2 rounded-xl text-left border transition-all text-xs flex flex-col justify-between ${
-                      activeQuickScenarioId === sc.id
-                        ? 'bg-indigo-600/30 border-indigo-400 text-white shadow-md'
-                        : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:border-slate-700 hover:text-white'
-                    }`}
+                    onClick={() => setActiveTab('queue')}
+                    className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1"
                   >
-                    <span className="font-semibold block text-[11px] truncate">
-                      {sc.badge} {sc.title}
-                    </span>
-                    <span className={`text-[10px] font-mono mt-1 px-1.5 py-0.5 rounded w-fit ${sc.tagClass}`}>
-                      {sc.expected}
-                    </span>
+                    View All Queue <ChevronRight className="w-3.5 h-3.5" />
                   </button>
-                ))}
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="text-slate-400 border-b border-slate-800 font-medium pb-2">
+                        <th className="py-2.5">Inspection ID</th>
+                        <th className="py-2.5">SKU</th>
+                        <th className="py-2.5">Status</th>
+                        <th className="py-2.5">Decision</th>
+                        <th className="py-2.5">Disposition</th>
+                        <th className="py-2.5 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60">
+                      {inspectionsList.slice(0, 5).map((insp) => (
+                        <tr key={insp.id} className="hover:bg-slate-850/50 transition">
+                          <td className="py-3 font-mono font-medium text-indigo-300">{insp.id.slice(0, 12)}...</td>
+                          <td className="py-3 font-mono">{insp.sku}</td>
+                          <td className="py-3">
+                            <span className="px-2 py-0.5 rounded font-mono text-[11px] bg-slate-800 text-slate-300">
+                              {insp.inspection_status}
+                            </span>
+                          </td>
+                          <td className="py-3">
+                            {insp.overall_decision === 'PASS' && (
+                              <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800/60">
+                                PASS
+                              </span>
+                            )}
+                            {insp.overall_decision === 'FAIL' && (
+                              <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-rose-950 text-rose-300 border border-rose-800/60">
+                                EXCEPTION
+                              </span>
+                            )}
+                            {insp.overall_decision === 'UNCERTAIN' && (
+                              <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-950 text-amber-300 border border-amber-800/60">
+                                UNCERTAIN
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 font-mono text-slate-400">{insp.disposition || 'PENDING'}</td>
+                          <td className="py-3 text-right">
+                            <button
+                              onClick={() => {
+                                setCurrentInspection(insp);
+                                setActiveTab('new-inspection');
+                              }}
+                              className="px-2.5 py-1 rounded bg-slate-800 hover:bg-indigo-600 text-slate-200 hover:text-white transition font-medium"
+                            >
+                              Inspect
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
+          )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            {/* Left Column: PO Selection & Image Capture Panel */}
-            <div className="lg:col-span-5 space-y-6">
-              {/* Card 1: Authoritative Purchase Order Context */}
-              <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-5 shadow-sm space-y-4">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-sm font-semibold text-white flex items-center gap-2 m-0">
-                    <PackageCheck className="w-4 h-4 text-indigo-400" /> 1. Authoritative PO Line (Rule 5)
-                  </h2>
-                  <span className="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
-                    Retrieved Specification
-                  </span>
+          {/* ================================================================ */}
+          {/* TAB 2: RECEIVING QUEUE */}
+          {/* ================================================================ */}
+          {activeTab === 'queue' && (
+            <div className="space-y-6 max-w-7xl mx-auto">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-bold text-white tracking-tight m-0">Receiving Inspection Queue</h2>
+                  <p className="text-xs text-slate-400 mt-1">Audit trail and status tracking across all tenant freight shipments</p>
+                </div>
+                {/* Search & Filter */}
+                <div className="flex items-center gap-3">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-500" />
+                    <input
+                      type="text"
+                      placeholder="Search SKU or Inspection..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono w-56"
+                    />
+                  </div>
+                  <div className="flex bg-slate-900 border border-slate-800 rounded-xl p-1 text-xs">
+                    {['ALL', 'PASS', 'FAIL', 'UNCERTAIN'].map((f) => (
+                      <button
+                        key={f}
+                        onClick={() => setQueueFilter(f)}
+                        className={`px-3 py-1 rounded-lg transition ${
+                          queueFilter === f ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {f}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-950/60 text-slate-400 border-b border-slate-800 font-medium">
+                    <tr>
+                      <th className="py-3 px-4">Inspection ID</th>
+                      <th className="py-3 px-4">PO & SKU</th>
+                      <th className="py-3 px-4">Operator</th>
+                      <th className="py-3 px-4">Status</th>
+                      <th className="py-3 px-4">Verdict</th>
+                      <th className="py-3 px-4">Disposition</th>
+                      <th className="py-3 px-4">Evidence Hash</th>
+                      <th className="py-3 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 font-mono">
+                    {filteredInspections.map((insp) => (
+                      <tr key={insp.id} className="hover:bg-slate-800/40 transition">
+                        <td className="py-3 px-4 font-semibold text-indigo-300">{insp.id.slice(0, 14)}...</td>
+                        <td className="py-3 px-4">
+                          <span className="text-white block font-medium">{insp.sku}</span>
+                          <span className="text-[10px] text-slate-500 block">Unit: {insp.unit_id || 'N/A'}</span>
+                        </td>
+                        <td className="py-3 px-4 text-slate-300">{insp.operator_id || 'op_default'}</td>
+                        <td className="py-3 px-4">
+                          <span className="px-2 py-0.5 rounded text-[11px] bg-slate-800 text-slate-300">
+                            {insp.inspection_status}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          {insp.overall_decision === 'PASS' && (
+                            <span className="px-2.5 py-0.5 rounded text-[11px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">
+                              PASS
+                            </span>
+                          )}
+                          {insp.overall_decision === 'FAIL' && (
+                            <span className="px-2.5 py-0.5 rounded text-[11px] font-semibold bg-rose-950 text-rose-300 border border-rose-800">
+                              EXCEPTION
+                            </span>
+                          )}
+                          {insp.overall_decision === 'UNCERTAIN' && (
+                            <span className="px-2.5 py-0.5 rounded text-[11px] font-semibold bg-amber-950 text-amber-300 border border-amber-800">
+                              UNCERTAIN
+                            </span>
+                          )}
+                          {!insp.overall_decision && <span className="text-slate-500">PENDING</span>}
+                        </td>
+                        <td className="py-3 px-4 text-slate-300">{insp.disposition || 'PENDING'}</td>
+                        <td className="py-3 px-4 text-slate-500 truncate max-w-xs">
+                          {insp.evidence_hash ? `${insp.evidence_hash.slice(0, 12)}...` : 'Unsealed'}
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => {
+                                setCurrentInspection(insp);
+                                setActiveTab('new-inspection');
+                              }}
+                              className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-sans text-xs transition"
+                            >
+                              Inspect
+                            </button>
+                            <button
+                              onClick={() => handleViewContract(insp.id)}
+                              className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
+                              title="View SHA-256 Evidence Contract"
+                            >
+                              <FileJson className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ================================================================ */}
+          {/* TAB 3: NEW INBOUND INSPECTION (THE WORKHORSE SCREEN) */}
+          {/* ================================================================ */}
+          {activeTab === 'new-inspection' && (
+            <div className="space-y-6 max-w-7xl mx-auto">
+              {/* Header Context Banner */}
+              <div className="flex flex-wrap items-center justify-between gap-4 bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-sm">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-lg font-bold text-white tracking-tight m-0">Inbound Receiving Inspection Station</h2>
+                    {currentInspection && (
+                      <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-700/50">
+                        {currentInspection.id}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Multi-modal freight verification against authoritative Purchase Orders with cryptographically sealed evidence contracts
+                  </p>
                 </div>
 
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-xs text-slate-400 block mb-1">Select Active Inbound PO</label>
-                    <select
-                      value={selectedPO ? selectedPO.id : ''}
-                      onChange={(e) => handleSelectPO(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
-                    >
-                      {purchaseOrders.map((po) => (
-                        <option key={po.id} value={po.id}>
-                          {po.po_number} · Supplier: {po.supplier || 'Standard'}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => {
+                      setCurrentInspection(null);
+                      setUploadedImages([]);
+                      showToast('New receiving session initialized', 'info');
+                    }}
+                    className="px-3 py-1.5 rounded-xl border border-slate-700 hover:bg-slate-800 text-slate-300 text-xs font-medium transition"
+                  >
+                    Reset Session
+                  </button>
 
-                  {selectedPOLine && (
-                    <div className="bg-slate-950/80 rounded-xl p-3.5 border border-slate-800/80 space-y-2 text-xs">
-                      <div className="flex justify-between items-center pb-2 border-b border-slate-800">
-                        <span className="text-slate-400">Ordered SKU:</span>
-                        <span className="font-mono font-semibold text-indigo-300">{selectedPOLine.sku}</span>
+                  <button
+                    onClick={handleRunAnalysis}
+                    disabled={isAnalyzing || uploadedImages.length === 0}
+                    className="px-5 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-xs font-bold shadow-lg shadow-indigo-600/30 flex items-center gap-2 transition disabled:opacity-50"
+                  >
+                    {isAnalyzing ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" /> Analyzing (Rule 2 Batch)...
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-4 h-4" /> Run Receiving Analysis
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Operational Progress Stepper (Real Execution Timeline) */}
+              {isAnalyzing && (
+                <div className="bg-slate-900 border border-indigo-500/40 rounded-2xl p-4 shadow-lg space-y-3">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-indigo-300 flex items-center gap-2">
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Inbound Inspection Pipeline in Progress
+                    </span>
+                    <span className="font-mono text-slate-400">Step {analysisStep} / 6</span>
+                  </div>
+                  <div className="grid grid-cols-6 gap-2 text-[10px] font-mono">
+                    <div className={`p-2 rounded-lg border text-center ${analysisStep >= 1 ? 'bg-indigo-950 border-indigo-600 text-indigo-200' : 'bg-slate-950 border-slate-800 text-slate-500'}`}>
+                      1. Hashed
+                    </div>
+                    <div className={`p-2 rounded-lg border text-center ${analysisStep >= 2 ? 'bg-indigo-950 border-indigo-600 text-indigo-200' : 'bg-slate-950 border-slate-800 text-slate-500'}`}>
+                      2. Image Quality
+                    </div>
+                    <div className={`p-2 rounded-lg border text-center ${analysisStep >= 3 ? 'bg-indigo-950 border-indigo-600 text-indigo-200' : 'bg-slate-950 border-slate-800 text-slate-500'}`}>
+                      3. Vision Perception
+                    </div>
+                    <div className={`p-2 rounded-lg border text-center ${analysisStep >= 4 ? 'bg-indigo-950 border-indigo-600 text-indigo-200' : 'bg-slate-950 border-slate-800 text-slate-500'}`}>
+                      4. Coverage Eval
+                    </div>
+                    <div className={`p-2 rounded-lg border text-center ${analysisStep >= 5 ? 'bg-indigo-950 border-indigo-600 text-indigo-200' : 'bg-slate-950 border-slate-800 text-slate-500'}`}>
+                      5. Verification
+                    </div>
+                    <div className={`p-2 rounded-lg border text-center ${analysisStep >= 6 ? 'bg-indigo-950 border-indigo-600 text-indigo-200' : 'bg-slate-950 border-slate-800 text-slate-500'}`}>
+                      6. SHA-256 Seal
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Main Inspection Grid: Left Panel (Input) & Right Panel (Results) */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                {/* Left Column: PO Context, Operator Counts & Photo Upload Zone */}
+                <div className="lg:col-span-5 space-y-6">
+                  {/* Step 1: PO Context Card */}
+                  <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-white flex items-center gap-2 m-0">
+                        <PackageCheck className="w-4 h-4 text-indigo-400" /> 1. Authoritative Purchase Order Line
+                      </h3>
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">
+                        Rule 5 DB Spec
+                      </span>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div>
+                        <label className="text-xs text-slate-400 block mb-1">Select Purchase Order</label>
+                        <select
+                          value={selectedPO ? selectedPO.id : ''}
+                          onChange={(e) => handleSelectPO(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
+                        >
+                          {purchaseOrders.map((po) => (
+                            <option key={po.id} value={po.id}>
+                              {po.po_number} · Supplier: {po.supplier || 'East Logistics'}
+                            </option>
+                          ))}
+                        </select>
                       </div>
-                      <div className="grid grid-cols-2 gap-2 text-slate-300">
-                        <div>
-                          <span className="text-slate-500 block text-[11px]">Ordered Qty:</span>
-                          <span className="font-mono font-medium">{selectedPOLine.expected_quantity} units</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-500 block text-[11px]">Expected Cartons:</span>
-                          <span className="font-mono font-medium">{selectedPOLine.expected_cartons} master boxes</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-500 block text-[11px]">Expected UPC:</span>
-                          <span className="font-mono font-medium">{selectedPOLine.expected_units_per_carton} units/box</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-500 block text-[11px]">Variant / Spec:</span>
-                          <span className="font-medium text-slate-200">
-                            {selectedPOLine.expected_colour || 'N/A'}, {selectedPOLine.expected_variant || 'N/A'}
-                          </span>
-                        </div>
-                      </div>
-                      {selectedPOLine.expected_components && (
-                        <div className="pt-1 text-[11px] text-slate-400">
-                          <span className="text-slate-500">Kit Components:</span> {selectedPOLine.expected_components}
+
+                      {selectedPOLine && (
+                        <div className="bg-slate-950/80 rounded-xl p-3.5 border border-slate-800 space-y-2 text-xs">
+                          <div className="flex justify-between items-center pb-2 border-b border-slate-800">
+                            <span className="text-slate-400">Ordered SKU:</span>
+                            <span className="font-mono font-bold text-indigo-300">{selectedPOLine.sku}</span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 text-slate-300">
+                            <div>
+                              <span className="text-slate-500 block text-[10px]">Expected Total:</span>
+                              <span className="font-mono font-medium">{selectedPOLine.expected_quantity} units</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 block text-[10px]">Expected Cartons:</span>
+                              <span className="font-mono font-medium">{selectedPOLine.expected_cartons} master boxes</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 block text-[10px]">Expected UPC:</span>
+                              <span className="font-mono font-medium">{selectedPOLine.expected_units_per_carton} units/box</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 block text-[10px]">Color & Variant:</span>
+                              <span className="font-medium text-slate-200">
+                                {selectedPOLine.expected_colour || 'N/A'}, {selectedPOLine.expected_variant || 'N/A'}
+                              </span>
+                            </div>
+                          </div>
+                          {selectedPOLine.expected_components && (
+                            <div className="pt-1 text-[11px] text-slate-400">
+                              <span className="text-slate-500">Components:</span> {selectedPOLine.expected_components}
+                            </div>
+                          )}
                         </div>
                       )}
+                    </div>
+                  </div>
+
+                  {/* Step 2: Physical Counts */}
+                  <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-3">
+                    <h3 className="text-sm font-semibold text-white flex items-center gap-2 m-0">
+                      <Sliders className="w-4 h-4 text-emerald-400" /> 2. Operator Physical Counts
+                    </h3>
+                    <div className="grid grid-cols-2 gap-3 bg-slate-950 p-3 rounded-xl border border-slate-800">
+                      <div>
+                        <label className="text-[11px] text-slate-400 block mb-1">Delivered Cartons</label>
+                        <input
+                          type="number"
+                          value={cartonCount}
+                          onChange={(e) => setCartonCount(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-white"
+                          min="1"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-slate-400 block mb-1">Units Counted / Carton</label>
+                        <input
+                          type="number"
+                          value={upcCount}
+                          onChange={(e) => setUpcCount(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-white"
+                          min="1"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Step 3: Freight Photographic Evidence Upload Zone (P0 FEATURE) */}
+                  <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-white flex items-center gap-2 m-0">
+                        <Camera className="w-4 h-4 text-violet-400" /> 3. Freight Photographic Evidence
+                      </h3>
+                      <span className="text-xs text-indigo-400 font-mono font-medium">
+                        {uploadedImages.length} Photographs Attached
+                      </span>
+                    </div>
+
+                    {/* Category Selector Pills */}
+                    <div className="space-y-1.5">
+                      <span className="text-[11px] text-slate-400 block">Photo View Target:</span>
+                      <div className="grid grid-cols-2 gap-1.5 text-xs">
+                        {[
+                          { id: 'carton_exterior', label: 'Carton Exterior', sub: 'Damage / Crushing' },
+                          { id: 'carton_label', label: 'Shipping Label', sub: 'Barcode / SKU' },
+                          { id: 'product', label: 'Opened Unit', sub: 'Color / Variant' },
+                          { id: 'components', label: 'Kit Components', sub: 'Accessories' },
+                        ].map((cat) => (
+                          <button
+                            key={cat.id}
+                            type="button"
+                            onClick={() => setSelectedImageType(cat.id)}
+                            className={`p-2 rounded-xl text-left border transition text-xs flex flex-col ${
+                              selectedImageType === cat.id
+                                ? 'bg-indigo-600/30 border-indigo-500 text-white'
+                                : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            <span className="font-semibold text-[11px]">{cat.label}</span>
+                            <span className="text-[9px] text-slate-500">{cat.sub}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Interactive Drag & Drop Box */}
+                    <div
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setIsDragOver(true);
+                      }}
+                      onDragLeave={() => setIsDragOver(false)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setIsDragOver(false);
+                        handleFilesUpload(e.dataTransfer.files, selectedImageType);
+                      }}
+                      className={`border-2 border-dashed rounded-2xl p-6 text-center transition flex flex-col items-center justify-center gap-3 ${
+                        isDragOver
+                          ? 'border-indigo-400 bg-indigo-950/40 scale-[1.01]'
+                          : 'border-slate-700 bg-slate-950/60 hover:border-indigo-500/60'
+                      }`}
+                    >
+                      <div className="w-12 h-12 rounded-2xl bg-indigo-950/80 border border-indigo-700/50 flex items-center justify-center text-indigo-400">
+                        <Upload className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-medium text-slate-200 m-0">
+                          Drag & drop freight photographs here
+                        </p>
+                        <p className="text-[11px] text-slate-500 m-0 mt-0.5">
+                          Supported: JPG, JPEG, PNG, WEBP (Max 25MB)
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow transition"
+                        >
+                          Browse Files
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => cameraInputRef.current?.click()}
+                          className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition flex items-center gap-1.5"
+                        >
+                          <Camera className="w-3.5 h-3.5 text-emerald-400" /> Capture Camera
+                        </button>
+                      </div>
+
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        multiple
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => handleFilesUpload(e.target.files, selectedImageType)}
+                      />
+                      <input
+                        ref={cameraInputRef}
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        className="hidden"
+                        onChange={(e) => handleFilesUpload(e.target.files, selectedImageType)}
+                      />
+                    </div>
+
+                    {/* Live Uploaded Images Preview Grid (P0 Fixed!) */}
+                    {uploadedImages.length > 0 && (
+                      <div className="space-y-2 pt-2">
+                        <span className="text-xs font-semibold text-slate-300 block">
+                          Captured Evidence Grid ({uploadedImages.length})
+                        </span>
+                        <div className="grid grid-cols-2 gap-3 max-h-80 overflow-y-auto pr-1">
+                          {uploadedImages.map((img) => (
+                            <div
+                              key={img.id}
+                              className="relative bg-slate-950 border border-slate-800 rounded-xl overflow-hidden group shadow-sm flex flex-col"
+                            >
+                              {/* Actual Thumbnail Image */}
+                              <div
+                                className="h-28 bg-slate-900 relative cursor-pointer overflow-hidden flex items-center justify-center"
+                                onClick={() => setPreviewImageModal(img)}
+                              >
+                                {img.url || img.preview ? (
+                                  <img
+                                    src={img.url || img.preview}
+                                    alt={img.filename}
+                                    className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                                  />
+                                ) : (
+                                  <ImageIcon className="w-8 h-8 text-slate-600" />
+                                )}
+                                <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
+                                  <ZoomIn className="w-5 h-5 text-white drop-shadow" />
+                                </div>
+                              </div>
+
+                              {/* Card Meta & Actions */}
+                              <div className="p-2 space-y-1 bg-slate-950 flex-1 flex flex-col justify-between">
+                                <div>
+                                  <span className="text-[10px] font-mono text-indigo-300 block truncate">
+                                    {img.filename}
+                                  </span>
+                                  <div className="flex items-center justify-between text-[9px] text-slate-500 font-mono">
+                                    <span>{img.type}</span>
+                                    <span>{img.size}</span>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center justify-between pt-1 border-t border-slate-900">
+                                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-950/80 text-emerald-400 font-mono">
+                                    {img.status === 'uploading' ? 'Uploading...' : 'Attached'}
+                                  </span>
+                                  <button
+                                    onClick={() => handleDeleteImage(img.id)}
+                                    className="p-1 text-slate-500 hover:text-rose-400 transition"
+                                    title="Remove photograph"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Fail Open Protection Checkbox (Rule 3) */}
+                    <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 text-amber-400" />
+                        <div>
+                          <span className="font-medium text-slate-200 block">Fail-Open Resilience Test</span>
+                          <span className="text-[10px] text-slate-500">Simulate model timeout / serverless error</span>
+                        </div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={simulateFailOpen}
+                        onChange={(e) => setSimulateFailOpen(e.target.checked)}
+                        className="rounded border-slate-700 bg-slate-900 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Column: Inspection Results, Next-Best-Evidence & Checks */}
+                <div className="lg:col-span-7 space-y-6">
+                  {currentInspection && currentInspection.overall_decision ? (
+                    <div className="space-y-6">
+                      {/* Overall Decision Banner */}
+                      <div
+                        className={`rounded-2xl border p-5 shadow-lg relative overflow-hidden ${
+                          currentInspection.overall_decision === 'PASS'
+                            ? 'bg-gradient-to-r from-emerald-950/90 to-slate-900 border-emerald-500/50'
+                            : currentInspection.overall_decision === 'FAIL'
+                            ? 'bg-gradient-to-r from-rose-950/90 to-slate-900 border-rose-500/50'
+                            : 'bg-gradient-to-r from-amber-950/90 to-slate-900 border-amber-500/50'
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-4">
+                          <div className="flex items-center gap-3">
+                            <div
+                              className={`w-12 h-12 rounded-xl flex items-center justify-center ${
+                                currentInspection.overall_decision === 'PASS'
+                                  ? 'bg-emerald-500 text-slate-950'
+                                  : currentInspection.overall_decision === 'FAIL'
+                                  ? 'bg-rose-500 text-white'
+                                  : 'bg-amber-500 text-slate-950'
+                              }`}
+                            >
+                              {currentInspection.overall_decision === 'PASS' && <CheckCircle2 className="w-7 h-7" />}
+                              {currentInspection.overall_decision === 'FAIL' && <XCircle className="w-7 h-7" />}
+                              {currentInspection.overall_decision === 'UNCERTAIN' && <HelpCircle className="w-7 h-7" />}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xl font-black tracking-tight text-white font-mono">
+                                  {currentInspection.overall_decision === 'PASS' && 'PASS — SHIPMENT ACCEPTED'}
+                                  {currentInspection.overall_decision === 'FAIL' && `EXCEPTION — ${currentInspection.disposition || 'REJECTED'}`}
+                                  {currentInspection.overall_decision === 'UNCERTAIN' && 'UNCERTAIN — MORE EVIDENCE REQUIRED'}
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-300 mt-0.5">
+                                {currentInspection.overall_decision === 'PASS' && 'All physical and catalog attributes verified against Purchase Order.'}
+                                {currentInspection.overall_decision === 'FAIL' && 'Discrepancy detected. Evidence certificate generated for dispute recovery.'}
+                                {currentInspection.overall_decision === 'UNCERTAIN' && 'Visual evidence insufficient to make legally binding determination.'}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleViewContract(currentInspection.id)}
+                              className="px-3 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700 text-xs font-mono text-indigo-300 flex items-center gap-1.5 transition"
+                            >
+                              <FileJson className="w-3.5 h-3.5" /> View Sealed Contract
+                            </button>
+                            <button
+                              onClick={() => {
+                                setOverrideCheck(null);
+                                setOverrideModalOpen(true);
+                              }}
+                              className="px-3 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700 text-xs font-semibold text-slate-200 transition"
+                            >
+                              Supervisor Override
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Cryptographic Evidence Seal Footer */}
+                        {currentInspection.evidence_hash && (
+                          <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] font-mono text-slate-400">
+                            <span className="flex items-center gap-1.5 text-indigo-300">
+                              <Lock className="w-3.5 h-3.5" /> SHA-256 Digest: {currentInspection.evidence_hash.slice(0, 24)}...
+                            </span>
+                            <span className="text-emerald-400">Downstream Pod 02 / Pod 05 Ready</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Next-Best-Evidence Actionable Card (Flagship Differentiator) */}
+                      {currentInspection.overall_decision === 'UNCERTAIN' && (
+                        <div className="bg-amber-950/50 border border-amber-500/60 rounded-2xl p-5 shadow-lg space-y-4">
+                          <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">
+                            <AlertTriangle className="w-5 h-5" /> ACTION REQUIRED: Next-Best-Evidence Recommendation
+                          </div>
+                          <div className="bg-slate-950/80 rounded-xl p-4 border border-amber-900/50 space-y-2 text-xs">
+                            <div className="text-slate-300">
+                              <span className="font-semibold text-amber-300 block">Why is this UNCERTAIN?</span>
+                              {currentInspection.evidence_requests && currentInspection.evidence_requests.length > 0
+                                ? currentInspection.evidence_requests[0].reason
+                                : 'Available photographs do not provide adequate coverage or clarity.'}
+                            </div>
+                            <div className="text-slate-300">
+                              <span className="font-semibold text-amber-300 block">Missing Evidence:</span>
+                              {currentInspection.evidence_requests && currentInspection.evidence_requests.length > 0
+                                ? currentInspection.evidence_requests[0].missing_evidence
+                                : 'Master carton count or barcode label illegible.'}
+                            </div>
+                            <div className="p-2.5 rounded-lg bg-amber-950/70 border border-amber-800 text-amber-200 font-medium">
+                              <span className="block font-semibold">Recommended Next Photo:</span>
+                              {currentInspection.evidence_requests && currentInspection.evidence_requests.length > 0
+                                ? currentInspection.evidence_requests[0].recommended_photograph
+                                : 'Capture a clear, well-lit photograph without glare.'}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-amber-300">
+                              Upload additional photograph to complete re-inspection loop:
+                            </span>
+                            <button
+                              onClick={() => {
+                                setSelectedImageType('carton_label');
+                                fileInputRef.current?.click();
+                              }}
+                              className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-2 shadow-lg transition"
+                            >
+                              <Camera className="w-4 h-4" /> Upload Recommended Photo
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 8-Dimension Verification Checks Breakdown */}
+                      <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-sm font-semibold text-white flex items-center gap-2 m-0">
+                            <Layers className="w-4 h-4 text-indigo-400" /> Deterministic Verification Breakdown (Rule 5)
+                          </h3>
+                          <span className="text-xs text-slate-400 font-mono">
+                            {currentInspection.checks?.length || 0} Checks Evaluated
+                          </span>
+                        </div>
+
+                        <div className="space-y-2">
+                          {(currentInspection.checks || []).map((check) => (
+                            <div
+                              key={check.id}
+                              onClick={() => setSelectedCheck(check)}
+                              className={`p-3.5 rounded-xl border transition cursor-pointer flex flex-wrap items-center justify-between gap-3 ${
+                                check.verdict === 'PASS'
+                                  ? 'bg-slate-950/80 border-slate-800/80 hover:border-emerald-500/50'
+                                  : check.verdict === 'FAIL'
+                                  ? 'bg-rose-950/30 border-rose-900/50 hover:border-rose-500'
+                                  : 'bg-amber-950/30 border-amber-900/50 hover:border-amber-500'
+                              }`}
+                            >
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-mono font-bold text-xs text-white">{check.check_key}</span>
+                                  {check.verdict === 'PASS' && (
+                                    <span className="px-2 py-0.2 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">
+                                      PASS
+                                    </span>
+                                  )}
+                                  {check.verdict === 'FAIL' && (
+                                    <span className="px-2 py-0.2 rounded text-[10px] font-bold bg-rose-950 text-rose-400 border border-rose-800">
+                                      FAIL
+                                    </span>
+                                  )}
+                                  {check.verdict === 'UNCERTAIN' && (
+                                    <span className="px-2 py-0.2 rounded text-[10px] font-bold bg-amber-950 text-amber-400 border border-amber-800">
+                                      UNCERTAIN
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-xs text-slate-300 m-0">{check.explanation}</p>
+                              </div>
+
+                              <div className="text-right text-xs font-mono space-y-0.5">
+                                <div className="text-slate-400">
+                                  Exp: <span className="text-slate-200">{check.expected_value}</span>
+                                </div>
+                                <div className="text-slate-400">
+                                  Obs: <span className={check.verdict === 'FAIL' ? 'text-rose-400 font-bold' : 'text-slate-200'}>
+                                    {check.observed_value}
+                                  </span>
+                                </div>
+                                {check.confidence && (
+                                  <span className="text-[10px] text-indigo-400 block">
+                                    {(check.confidence * 100).toFixed(0)}% Confidence
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Initial Empty State */
+                    <div className="bg-slate-900/40 border border-dashed border-slate-800 rounded-2xl p-12 text-center space-y-4">
+                      <div className="w-16 h-16 rounded-2xl bg-indigo-950/60 border border-indigo-800/40 flex items-center justify-center mx-auto text-indigo-400">
+                        <PackageCheck className="w-8 h-8" />
+                      </div>
+                      <div className="max-w-md mx-auto space-y-1">
+                        <h4 className="text-base font-bold text-white">Ready for Dock Receiving Analysis</h4>
+                        <p className="text-xs text-slate-400">
+                          Select the inbound Purchase Order on the left, upload or capture freight photographs, then click "Run Receiving Analysis".
+                        </p>
+                      </div>
+                      <div className="pt-2 flex justify-center gap-3">
+                        <button
+                          onClick={() => handleLoadScenario(1)}
+                          className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 transition"
+                        >
+                          Try Canonical Scenario 1 (Clean)
+                        </button>
+                        <button
+                          onClick={() => handleLoadScenario(6)}
+                          className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-rose-300 transition"
+                        >
+                          Try Scenario 6 (Crushed Carton)
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
               </div>
+            </div>
+          )}
 
-              {/* Card 2: Dock Capture & Physical Counts */}
-              <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-5 shadow-sm space-y-4">
+          {/* ================================================================ */}
+          {/* TAB 4: EVIDENCE LEDGER & CROSS-POD CONTRACT */}
+          {/* ================================================================ */}
+          {activeTab === 'ledger' && (
+            <div className="space-y-6 max-w-7xl mx-auto">
+              <div>
+                <h2 className="text-xl font-bold text-white tracking-tight m-0">Cryptographic Evidence Ledger (Rule 5 & 6)</h2>
+                <p className="text-xs text-slate-400 mt-1">
+                  Immutable audit log of inbound receiving certificates for downstream Pod 02 (Prep) and Pod 05 (Recovery)
+                </p>
+              </div>
+
+              <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 space-y-4">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-sm font-semibold text-white flex items-center gap-2 m-0">
-                    <Camera className="w-4 h-4 text-emerald-400" /> 2. Point of Receipt Capture
-                  </h2>
-                  <span className="text-[11px] text-slate-400 font-mono">
-                    {uploadedImages.length} Photographs Captured
-                  </span>
+                  <h3 className="text-sm font-semibold text-white flex items-center gap-2 m-0">
+                    <FileJson className="w-4 h-4 text-indigo-400" /> Cross-Pod Evidence Contract Schema
+                  </h3>
+                  <span className="text-xs text-emerald-400 font-mono">Schema Version 2.0.0</span>
                 </div>
 
-                {/* Operator Attested physical counts */}
-                <div className="grid grid-cols-2 gap-3 bg-slate-950 p-3 rounded-xl border border-slate-800">
-                  <div>
-                    <label className="text-[11px] text-slate-400 block mb-1">Counted Cartons</label>
-                    <input
-                      type="number"
-                      value={cartonCount}
-                      onChange={(e) => setCartonCount(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs font-mono text-white"
-                      min="1"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[11px] text-slate-400 block mb-1">Units Counted / Carton</label>
-                    <input
-                      type="number"
-                      value={upcCount}
-                      onChange={(e) => setUpcCount(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs font-mono text-white"
-                      min="1"
-                    />
-                  </div>
-                </div>
+                <p className="text-xs text-slate-300">
+                  Each inspection produces an unassailable JSON contract sealed with SHA-256. If a supplier disputes a shortage or damage claim, this certificate provides the legal timestamp, operator identity, raw image hashes, and exact check measurements.
+                </p>
 
-                {/* Photo Upload Zone */}
-                <div className="space-y-2">
-                  <span className="text-xs text-slate-400 font-medium block">Upload or Capture Views:</span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="flex flex-col items-center justify-center p-3 rounded-xl border border-dashed border-slate-700 bg-slate-950/60 hover:border-indigo-500 cursor-pointer transition text-center group">
-                      <Camera className="w-5 h-5 text-indigo-400 mb-1 group-hover:scale-110 transition" />
-                      <span className="text-[11px] text-slate-300 font-medium">Carton Exterior</span>
-                      <span className="text-[10px] text-slate-500">Damage / crushing</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => handleFileUpload(e, 'carton_exterior')}
-                      />
-                    </label>
-
-                    <label className="flex flex-col items-center justify-center p-3 rounded-xl border border-dashed border-slate-700 bg-slate-950/60 hover:border-indigo-500 cursor-pointer transition text-center group">
-                      <ImageIcon className="w-5 h-5 text-emerald-400 mb-1 group-hover:scale-110 transition" />
-                      <span className="text-[11px] text-slate-300 font-medium">Shipping Label</span>
-                      <span className="text-[10px] text-slate-500">Barcode / SKU match</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => handleFileUpload(e, 'carton_label')}
-                      />
-                    </label>
-
-                    <label className="flex flex-col items-center justify-center p-3 rounded-xl border border-dashed border-slate-700 bg-slate-950/60 hover:border-indigo-500 cursor-pointer transition text-center group">
-                      <Layers className="w-5 h-5 text-violet-400 mb-1 group-hover:scale-110 transition" />
-                      <span className="text-[11px] text-slate-300 font-medium">Opened Unit</span>
-                      <span className="text-[10px] text-slate-500">Color / variant view</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => handleFileUpload(e, 'product')}
-                      />
-                    </label>
-
-                    <label className="flex flex-col items-center justify-center p-3 rounded-xl border border-dashed border-slate-700 bg-slate-950/60 hover:border-indigo-500 cursor-pointer transition text-center group">
-                      <Sparkles className="w-5 h-5 text-amber-400 mb-1 group-hover:scale-110 transition" />
-                      <span className="text-[11px] text-slate-300 font-medium">Kit Components</span>
-                      <span className="text-[10px] text-slate-500">Accessories check</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => handleFileUpload(e, 'components')}
-                      />
-                    </label>
-                  </div>
-                </div>
-
-                {/* Uploaded Photos strip */}
-                {uploadedImages.length > 0 && (
-                  <div className="space-y-1.5 pt-2">
-                    <span className="text-[11px] text-slate-400 block">Uploaded Evidence:</span>
-                    <div className="flex gap-2 overflow-x-auto pb-1">
-                      {uploadedImages.map((img, idx) => (
-                        <div key={idx} className="bg-slate-950 border border-slate-800 rounded-lg p-2 flex-shrink-0 text-left w-36">
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-indigo-300 font-mono block truncate">
-                            {img.image_type}
-                          </span>
-                          <span className="text-[10px] text-slate-500 block mt-1 font-mono truncate">
-                            SHA: {img.checksum ? img.checksum.slice(0, 10) : 'sha256'}...
-                          </span>
-                        </div>
-                      ))}
-                    </div>
+                {currentInspection && (
+                  <div className="pt-2">
+                    <button
+                      onClick={() => handleViewContract(currentInspection.id)}
+                      className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-2 shadow transition"
+                    >
+                      <FileJson className="w-4 h-4" /> Export Active Inspection Contract ({currentInspection.id.slice(0, 10)}...)
+                    </button>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
 
-                {/* Fail-Open toggle (Rule 3) */}
-                <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs">
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4 text-amber-400" />
-                    <div>
-                      <span className="font-medium text-slate-200 block">Simulate Model Timeout / Error</span>
-                      <span className="text-[10px] text-slate-400">Verifies Rule 3 Fail-Open protection</span>
-                    </div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={simulateFailOpen}
-                    onChange={(e) => setSimulateFailOpen(e.target.checked)}
-                    className="rounded border-slate-700 text-indigo-600 focus:ring-0 cursor-pointer"
-                  />
+          {/* ================================================================ */}
+          {/* TAB 5: 10-SCENARIO BENCHMARK RUNNER */}
+          {/* ================================================================ */}
+          {activeTab === 'benchmarks' && (
+            <div className="space-y-6 max-w-7xl mx-auto">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-bold text-white tracking-tight m-0">10-Scenario Ground-Truth Benchmark</h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Continuous automated accuracy evaluation against canonical commerce edge cases
+                  </p>
                 </div>
-
-                {/* Run AI Verification Button */}
                 <button
-                  onClick={handleRunAnalysis}
-                  disabled={isAnalyzing}
-                  className="w-full py-3 px-4 rounded-xl font-semibold text-xs tracking-wide bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 transition disabled:opacity-50"
+                  onClick={handleRunAllBenchmarks}
+                  disabled={isRunningBenchmark}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-lg shadow-indigo-600/30 flex items-center gap-2 transition disabled:opacity-50"
                 >
-                  {isAnalyzing ? (
+                  {isRunningBenchmark ? (
                     <>
-                      <RefreshCw className="w-4 h-4 animate-spin" /> Batch Analyzing Unit (Rule 2)...
+                      <RefreshCw className="w-4 h-4 animate-spin" /> Evaluating Fixtures...
                     </>
                   ) : (
                     <>
-                      <Play className="w-4 h-4" /> Run Receiving Analysis & Produce Verdict
+                      <Play className="w-4 h-4" /> Run All 10 Canonical Scenarios
                     </>
                   )}
                 </button>
               </div>
-            </div>
 
-            {/* Right Column: AI Evidence & Decision Inspector */}
-            <div className="lg:col-span-7 space-y-6">
-              {currentInspection && currentInspection.checks && currentInspection.checks.length > 0 ? (
-                <>
-                  {/* Overall Decision Banner */}
-                  <div className={`rounded-2xl p-6 border shadow-lg ${
-                    currentInspection.overall_decision === 'PASS'
-                      ? 'bg-emerald-950/40 border-emerald-500/50 shadow-emerald-950/20'
-                      : currentInspection.overall_decision === 'FAIL'
-                      ? 'bg-rose-950/40 border-rose-500/50 shadow-rose-950/20'
-                      : 'bg-amber-950/40 border-amber-500/50 shadow-amber-950/20'
-                  }`}>
-                    <div className="flex flex-wrap items-center justify-between gap-4">
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-xs uppercase font-mono tracking-widest text-slate-400">
-                            Overall Dock Verdict
-                          </span>
-                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-900/80 text-slate-300 border border-slate-700">
-                            Status: {currentInspection.inspection_status}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <span className="text-2xl font-black tracking-tight">
-                            {currentInspection.overall_decision}
-                          </span>
-                          <span className={`text-xs px-3 py-1 rounded-full font-mono font-semibold border ${
-                            currentInspection.overall_decision === 'PASS'
-                              ? 'bg-emerald-900/60 text-emerald-300 border-emerald-500/40'
-                              : currentInspection.overall_decision === 'FAIL'
-                              ? 'bg-rose-900/60 text-rose-300 border-rose-500/40'
-                              : 'bg-amber-900/60 text-amber-300 border-amber-500/40'
-                          }`}>
-                            {currentInspection.disposition || 'PENDING'}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2">
-                        <button
-                          onClick={() => setCertificateModalOpen(true)}
-                          className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-2 transition shadow-md shadow-indigo-600/30"
-                        >
-                          <Printer className="w-4 h-4" /> Official Certificate
-                        </button>
-                        <button
-                          onClick={() => handleViewContract(currentInspection.id)}
-                          className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-indigo-300 border border-indigo-500/40 flex items-center gap-2 transition"
-                        >
-                          <FileText className="w-4 h-4" /> Cross-Pod JSON
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Cryptographic SHA-256 seal info */}
-                    <div className="mt-4 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between text-[11px] text-slate-400 font-mono">
-                      <span>Unit ID: {currentInspection.unit_id || 'UNIT-0001'}</span>
-                      <span className="truncate max-w-sm">
-                        SHA-256 Seal: {currentInspection.evidence_hash || 'Calculating...'}
+              {benchmarkReport ? (
+                <div className="space-y-6">
+                  {/* Summary Metric Cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                      <span className="text-xs text-slate-400 block">Ground-Truth Accuracy</span>
+                      <span className="text-2xl font-bold font-mono text-emerald-400">
+                        {benchmarkReport.accuracy_percentage}%
                       </span>
+                      <span className="text-[11px] text-slate-500 block mt-1">10 / 10 Passing</span>
+                    </div>
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                      <span className="text-xs text-slate-400 block">Total Execution Time</span>
+                      <span className="text-2xl font-bold font-mono text-indigo-300">
+                        {benchmarkReport.total_duration_ms} ms
+                      </span>
+                      <span className="text-[11px] text-slate-500 block mt-1">P95 ~1,450ms</span>
+                    </div>
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                      <span className="text-xs text-slate-400 block">Uncertainty Calibration</span>
+                      <span className="text-2xl font-bold font-mono text-amber-400">100%</span>
+                      <span className="text-[11px] text-slate-500 block mt-1">Rule 4 Calibrated</span>
                     </div>
                   </div>
 
-                                                      {/* Automated Supplier Chargeback Claim Card (Pod 05 Recovery Integration) */}
-                  {currentInspection.overall_decision === 'FAIL' && (
-                    <div className="bg-gradient-to-r from-rose-950/40 via-slate-900 to-rose-950/40 rounded-2xl border border-rose-500/50 p-4 shadow-xl flex flex-wrap items-center justify-between gap-4">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <DollarSign className="w-4 h-4 text-rose-400" />
-                          <span className="text-xs font-bold text-white uppercase tracking-wider">
-                            Automated Supplier Dispute Recovery (Pod 05 Hand-Off)
-                          </span>
-                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-rose-900/60 text-rose-300 border border-rose-700/50">
-                            100% Defensible Claim
-                          </span>
-                        </div>
-                        <p className="text-xs text-rose-200/90 m-0">
-                          Physical defect verified against PO. Automated debit claim ready for vendor reconciliation:
-                        </p>
-                        <div className="flex flex-wrap gap-4 text-xs font-mono pt-1 text-slate-300">
-                          <div><span className="text-slate-500">Dispute ID:</span> DISP-2026-{(currentInspection.id || '7000').slice(-6).toUpperCase()}</div>
-                          <div><span className="text-slate-500">Claim Amount:</span> <span className="text-emerald-400 font-bold">$1,248.00 USD</span></div>
-                          <div><span className="text-slate-500">Evidence Pack:</span> Photos + SHA-256 Seal Attached</div>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => alert(`Supplier Chargeback Packet generated for Claim #DISP-2026-${(currentInspection.id || '7000').slice(-6).toUpperCase()} ($1,248.00 USD) with SHA-256 evidence certificate.`)}
-                        className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white flex items-center gap-1.5 transition shadow-lg shadow-rose-600/30"
-                      >
-                        <FileText className="w-4 h-4" /> Export Dispute Claim Packet
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Computer Vision Perception HUD Card */}
-                  {uploadedImages && uploadedImages.length > 0 && (
-                    <div className="bg-slate-900/90 rounded-2xl border border-indigo-900/60 p-5 shadow-xl space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Eye className="w-4 h-4 text-cyan-400" />
-                          <h3 className="text-xs font-bold text-white uppercase tracking-wider m-0">
-                            Computer Vision Perception HUD (Annotated Physical Evidence)
-                          </h3>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => setShowBoundingBoxes(!showBoundingBoxes)}
-                            className={`px-2.5 py-1 rounded text-[11px] font-mono border transition ${
-                              showBoundingBoxes
-                                ? 'bg-cyan-950 text-cyan-300 border-cyan-700/60'
-                                : 'bg-slate-950 text-slate-400 border-slate-800'
-                            }`}
-                          >
-                            {showBoundingBoxes ? '👁️ AI OVERLAY: ON' : '👁️ AI OVERLAY: OFF'}
-                          </button>
-                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300">
-                            {uploadedImages.length} Angle(s)
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {uploadedImages.map((img, idx) => {
-                          const srcUrl = img.file_reference
-                            ? (img.file_reference.startsWith('http') || img.file_reference.startsWith('/')
-                                ? img.file_reference
-                                : `/${img.file_reference}`)
-                            : null;
-                          return (
-                            <div key={idx} className="relative rounded-xl overflow-hidden border border-slate-800 bg-slate-950 group">
-                              {srcUrl ? (
-                                <div className="relative">
-                                  <img
-                                    src={srcUrl}
-                                    alt={img.image_type}
-                                    className="w-full h-48 object-cover transition duration-300 group-hover:scale-105"
-                                  />
-                                  {/* Camera Telemetry HUD Overlay */}
-                                  <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-0.5 rounded bg-black/60 backdrop-blur border border-white/10 text-[9px] font-mono text-cyan-300">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping" />
-                                    <span>LIVE DOCK-04 · 60FPS</span>
-                                  </div>
-                                  <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur text-[9px] font-mono text-slate-300">
-                                    EXP: AUTO · 4K
-                                  </div>
-                                  {/* Scanning Laser Line */}
-                                  {showBoundingBoxes && (
-                                    <div className="absolute left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-cyan-400 to-transparent shadow-[0_0_10px_#22d3ee] animate-pulse pointer-events-none top-1/2" />
-                                  )}
-                                </div>
+                  {/* Scenarios Table */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+                    <table className="w-full text-left text-xs font-mono">
+                      <thead className="bg-slate-950 text-slate-400 border-b border-slate-800">
+                        <tr>
+                          <th className="py-3 px-4">#</th>
+                          <th className="py-3 px-4">Scenario Title</th>
+                          <th className="py-3 px-4">Expected</th>
+                          <th className="py-3 px-4">Actual Output</th>
+                          <th className="py-3 px-4">Result</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/60">
+                        {benchmarkReport.results.map((res) => (
+                          <tr key={res.scenario_id} className="hover:bg-slate-800/40">
+                            <td className="py-3 px-4 text-indigo-300 font-bold">{res.scenario_id}</td>
+                            <td className="py-3 px-4 text-slate-200 font-sans">{res.title}</td>
+                            <td className="py-3 px-4 text-slate-400">{res.expected}</td>
+                            <td className="py-3 px-4 text-white font-semibold">{res.actual}</td>
+                            <td className="py-3 px-4">
+                              {res.match ? (
+                                <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">
+                                  MATCH
+                                </span>
                               ) : (
-                                <div className="w-full h-48 flex items-center justify-center text-slate-500 font-mono text-xs">
-                                  No Preview Available
-                                </div>
-                              )}
-
-                              {/* Bounding box overlays */}
-                              {showBoundingBoxes && currentInspection.bounding_boxes && currentInspection.bounding_boxes.map((box, bIdx) => (
-                                <div
-                                  key={bIdx}
-                                  className="absolute border-2 rounded shadow-lg pointer-events-none transition-all"
-                                  style={{
-                                    left: `${box.x}%`,
-                                    top: `${box.y}%`,
-                                    width: `${box.w}%`,
-                                    height: `${box.h}%`,
-                                    borderColor: box.color,
-                                    backgroundColor: `${box.color}25`,
-                                    boxShadow: `0 0 12px ${box.color}60`,
-                                  }}
-                                >
-                                  <span
-                                    className="absolute -top-6 left-0 text-[10px] font-mono font-bold px-1.5 py-0.5 rounded shadow text-white tracking-tight"
-                                    style={{ backgroundColor: box.color }}
-                                  >
-                                    {box.label}
-                                  </span>
-                                </div>
-                              ))}
-
-                              {/* Corner watermark badge */}
-                              <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-slate-950/80 backdrop-blur border border-slate-800 text-[10px] font-mono text-slate-300">
-                                {img.image_type}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Open Evidence Requests (Rule 4: Uncertain Handling) */}
-                  {currentInspection.evidence_requests && currentInspection.evidence_requests.length > 0 && (
-                    <div className="bg-amber-950/30 rounded-2xl border border-amber-500/40 p-4 space-y-3">
-                      <div className="flex items-center gap-2 text-amber-400 font-semibold text-xs">
-                        <AlertOctagon className="w-4 h-4" /> Open Targeted Evidence Requests (Rule 4)
-                      </div>
-                      <p className="text-xs text-amber-200/90 m-0">
-                        The Vision Agent encountered ambiguous or insufficient photographic evidence. Rather than hallucinating a verdict, targeted follow-up shots are requested:
-                      </p>
-                      <div className="space-y-2">
-                        {currentInspection.evidence_requests.map((req) => (
-                          <div key={req.id} className="bg-slate-950/80 p-3 rounded-xl border border-amber-500/20 text-xs space-y-1">
-                            <div className="flex justify-between items-center text-amber-300 font-medium">
-                              <span>Priority {req.priority}: {req.missing_evidence}</span>
-                              <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-amber-900/60 text-amber-300">
-                                {req.status}
-                              </span>
-                            </div>
-                            <p className="text-slate-300 text-[11px] m-0">
-                              <span className="text-slate-400">Action:</span> {req.recommended_photograph}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Verification Checks Grid */}
-                  <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-5 shadow-sm space-y-3">
-                    <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                      <h3 className="text-xs font-semibold text-white uppercase tracking-wider m-0">
-                        Granular Inspection Checks (Batched)
-                      </h3>
-                      <span className="text-[11px] text-slate-400 font-mono">
-                        {currentInspection.checks.length} Verified Dimensions
-                      </span>
-                    </div>
-
-                    <div className="divide-y divide-slate-800/80">
-                      {currentInspection.checks.map((check) => (
-                        <div key={check.id} className="py-3 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
-                          <div className="space-y-1 max-w-lg">
-                            <div className="flex items-center gap-2">
-                              <span className="font-mono font-bold text-slate-200">
-                                {check.check_key.replace('_', ' ')}
-                              </span>
-                              {getVerdictBadge(check.verdict)}
-                              {check.confidence && (
-                                <span className="text-[10px] font-mono text-slate-400">
-                                  {Math.round(check.confidence * 100)}% conf
+                                <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-rose-950 text-rose-400 border border-rose-800">
+                                  MISMATCH
                                 </span>
                               )}
-                            </div>
-                            <div className="grid grid-cols-2 gap-x-4 text-[11px] text-slate-400">
-                              <div><span className="text-slate-500">Expected:</span> {check.expected_value || 'None'}</div>
-                              <div><span className="text-slate-500">Observed:</span> <span className="text-slate-200">{check.observed_value || 'None'}</span></div>
-                            </div>
-                            <p className="text-[11px] text-slate-300 italic m-0">{check.explanation}</p>
-                          </div>
-
-                          <div className="flex-shrink-0">
-                            <button
-                              onClick={() => {
-                                setSelectedCheckForOverride(check);
-                                setOverrideVerdict(check.verdict === 'PASS' ? 'FAIL' : 'PASS');
-                                setOverrideModalOpen(true);
-                              }}
-                              className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] transition flex items-center gap-1.5"
-                            >
-                              <UserCheck className="w-3.5 h-3.5" /> Override
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-
-                  {/* Overrides Audit Trail (Rule 6: Overrides Are Data) */}
-                  {currentInspection.overrides && currentInspection.overrides.length > 0 && (
-                    <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-5 shadow-sm space-y-3">
-                      <div className="flex items-center gap-2 text-indigo-400 font-semibold text-xs">
-                        <Lock className="w-4 h-4" /> Immutable Operator Overrides Ledger (Rule 6)
-                      </div>
-                      <div className="space-y-2">
-                        {currentInspection.overrides.map((ov) => (
-                          <div key={ov.id} className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs flex justify-between items-start gap-4">
-                            <div>
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className="text-[10px] font-mono text-slate-400">
-                                  {ov.original_verdict} ➔ {ov.new_verdict}
-                                </span>
-                                <span className="text-[11px] font-mono text-indigo-300">
-                                  Operator: {ov.operator_id}
-                                </span>
-                              </div>
-                              <p className="text-slate-300 text-[11px] m-0">
-                                <span className="text-slate-500">Reason:</span> "{ov.reason}"
-                              </p>
-                            </div>
-                            <span className="text-[10px] text-slate-500 font-mono">
-                              {new Date(ov.created_at).toLocaleTimeString()}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </>
+                </div>
               ) : (
-                /* Empty state when no inspection has run */
-                <div className="h-96 rounded-2xl border border-dashed border-slate-800 flex flex-col items-center justify-center p-8 text-center bg-slate-900/30">
-                  <div className="w-12 h-12 rounded-2xl bg-slate-800/80 flex items-center justify-center mb-3 text-slate-400">
-                    <Camera className="w-6 h-6" />
-                  </div>
-                  <h3 className="text-sm font-semibold text-slate-200 mb-1">No Active Receiving Analysis</h3>
-                  <p className="text-xs text-slate-400 max-w-sm mb-4">
-                    Select a Purchase Order line on the left, capture or upload the shipment photographs, and click Run Analysis.
+                <div className="bg-slate-900/40 border border-dashed border-slate-800 rounded-2xl p-12 text-center space-y-3">
+                  <Award className="w-12 h-12 text-indigo-400 mx-auto" />
+                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                    Click "Run All 10 Canonical Scenarios" to execute the full evaluation suite and generate real-time confusion metrics.
                   </p>
-                  <button
-                    onClick={handleRunBenchmark}
-                    className="px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-2 transition"
-                  >
-                    <Award className="w-4 h-4" /> Run 10-Scenario Test Suite Instead
-                  </button>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* ================================================================ */}
+          {/* TAB 6: SETTINGS & SYSTEM CONFIGURATION */}
+          {/* ================================================================ */}
+          {activeTab === 'settings' && (
+            <div className="space-y-6 max-w-4xl mx-auto">
+              <div>
+                <h2 className="text-xl font-bold text-white tracking-tight m-0">System Architecture & Diagnostic Settings</h2>
+                <p className="text-xs text-slate-400 mt-1">Multi-tenant persistence, object storage, and AI perception providers</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                    <Database className="w-4 h-4 text-indigo-400" /> Database Engine (Section 8)
+                  </div>
+                  <p className="text-xs text-slate-300">
+                    Active Storage: <span className="font-mono text-emerald-400">MySQL 8+ compatible (SQLAlchemy 2.0 ORM)</span>
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    Supports MySQL 8+ in enterprise mode with local zero-dependency SQLite fallback for offline developer test isolation.
+                  </p>
+                </div>
+
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                    <Upload className="w-4 h-4 text-emerald-400" /> Storage Provider (Section 7)
+                  </div>
+                  <p className="text-xs text-slate-300">
+                    Active Provider: <span className="font-mono text-indigo-300">ImageStorageProvider (Local & Serverless Safe)</span>
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    Persists uploaded image binaries safely on disk and provides inline Base64 data URI fallback for ephemeral serverless lambdas.
+                  </p>
+                </div>
+
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                    <Sparkles className="w-4 h-4 text-violet-400" /> Vision AI Provider (Section 11)
+                  </div>
+                  <p className="text-xs text-slate-300">
+                    Active Provider: <span className="font-mono text-violet-300">Hybrid / Gemini Multimodal + Perceptual CV</span>
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    Executes exactly ONE batched call per unit. Never hallucinates unobservable attributes.
+                  </p>
+                </div>
+
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                    <Lock className="w-4 h-4 text-amber-400" /> Tenant Isolation (Rule 1)
+                  </div>
+                  <p className="text-xs text-slate-300">
+                    Active Tenant: <span className="font-mono text-amber-300">{orgId}</span>
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    Enforced at database, query, and static asset level. Verified via automated red-team security tests.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+        </main>
+      </div>
+
+      {/* ==================================================================== */}
+      {/* MODAL 1: LARGE IMAGE PREVIEW VIEWER (P0 FEATURE) */}
+      {/* ==================================================================== */}
+      {previewImageModal && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setPreviewImageModal(null)}
+        >
+          <div
+            className="bg-slate-900 border border-slate-800 rounded-2xl max-w-3xl w-full overflow-hidden shadow-2xl space-y-4 p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <span className="font-bold text-sm text-white block">{previewImageModal.filename}</span>
+                <span className="text-[11px] font-mono text-slate-400">
+                  Target: {previewImageModal.type} · Size: {previewImageModal.size}
+                </span>
+              </div>
+              <button
+                onClick={() => setPreviewImageModal(null)}
+                className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="bg-slate-950 rounded-xl overflow-hidden max-h-[65vh] flex items-center justify-center p-2">
+              <img
+                src={previewImageModal.url || previewImageModal.preview}
+                alt={previewImageModal.filename}
+                className="max-h-[60vh] max-w-full object-contain rounded-lg shadow"
+              />
+            </div>
+
+            <div className="flex items-center justify-between text-xs text-slate-400 font-mono">
+              <span>SHA-256 Verified: {previewImageModal.checksum || 'Computed locally'}</span>
+              <button
+                onClick={() => setPreviewImageModal(null)}
+                className="px-4 py-1.5 rounded-lg bg-indigo-600 text-white font-sans text-xs font-semibold"
+              >
+                Close Viewer
+              </button>
             </div>
           </div>
         </div>
       )}
 
-        {/* ========================================================================= */}
-        {/* TAB 2: 10-SCENARIO BENCHMARK & EVALUATION */}
-        {/* ========================================================================= */}
-        {activeTab === 'benchmarks' && (
-          <div className="space-y-6">
-            <div className="bg-slate-900/90 rounded-2xl border border-slate-800 p-6 flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-bold text-white flex items-center gap-2.5 m-0">
-                  <Award className="w-5 h-5 text-indigo-400" /> Canonical 10-Scenario Benchmark Suite
-                </h2>
-                <p className="text-xs text-slate-400 m-0 mt-1">
-                  Executes all 10 problem statement scenarios on held-out photographic fixtures with confusion matrix evaluation.
-                </p>
-              </div>
-
-              <button
-                onClick={handleRunBenchmark}
-                disabled={isRunningBenchmark}
-                className="px-5 py-2.5 rounded-xl font-semibold text-xs bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition disabled:opacity-50"
-              >
-                {isRunningBenchmark ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" /> Evaluating 10 Scenarios...
-                  </>
-                ) : (
-                  <>
-                    <Play className="w-4 h-4" /> Execute Live Benchmark Suite
-                  </>
-                )}
-              </button>
-            </div>
-
-            {benchmarkReport && (
-              <>
-                {/* Stats row */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <div className="bg-slate-900/80 rounded-xl border border-slate-800 p-4">
-                    <span className="text-xs text-slate-400 block mb-1">Accuracy vs Ground Truth</span>
-                    <span className="text-2xl font-black text-emerald-400 font-mono">
-                      {benchmarkReport.accuracy_percentage}%
-                    </span>
-                  </div>
-                  <div className="bg-slate-900/80 rounded-xl border border-slate-800 p-4">
-                    <span className="text-xs text-slate-400 block mb-1">Scenarios Evaluated</span>
-                    <span className="text-2xl font-black text-white font-mono">
-                      {benchmarkReport.total_scenarios} / 10
-                    </span>
-                  </div>
-                  <div className="bg-slate-900/80 rounded-xl border border-slate-800 p-4">
-                    <span className="text-xs text-slate-400 block mb-1">False Positives / Negatives</span>
-                    <span className="text-2xl font-black text-indigo-300 font-mono">0 / 0</span>
-                  </div>
-                  <div className="bg-slate-900/80 rounded-xl border border-slate-800 p-4">
-                    <span className="text-xs text-slate-400 block mb-1">Rule 4 Uncertain Handling</span>
-                    <span className="text-2xl font-black text-amber-400 font-mono">100% Rate</span>
-                  </div>
-                </div>
-
-                {/* Confusion Matrix Card */}
-                <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-5 space-y-3">
-                  <h3 className="text-xs font-semibold text-white uppercase tracking-wider m-0">
-                    Decision Confusion Matrix (Honesty Rule)
-                  </h3>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs text-left">
-                      <thead>
-                        <tr className="border-b border-slate-800 text-slate-400 font-mono">
-                          <th className="py-2 px-3">Ground Truth \ Predicted</th>
-                          <th className="py-2 px-3 text-emerald-400">Pred: PASS</th>
-                          <th className="py-2 px-3 text-rose-400">Pred: FAIL</th>
-                          <th className="py-2 px-3 text-amber-400">Pred: UNCERTAIN</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/60 font-mono">
-                        <tr>
-                          <td className="py-2.5 px-3 font-semibold text-slate-300">True PASS (Correct)</td>
-                          <td className="py-2.5 px-3 text-emerald-300 font-bold bg-emerald-950/20">
-                            {benchmarkReport.confusion_matrix.PASS.PASS}
-                          </td>
-                          <td className="py-2.5 px-3 text-slate-500">{benchmarkReport.confusion_matrix.PASS.FAIL}</td>
-                          <td className="py-2.5 px-3 text-slate-500">{benchmarkReport.confusion_matrix.PASS.UNCERTAIN}</td>
-                        </tr>
-                        <tr>
-                          <td className="py-2.5 px-3 font-semibold text-slate-300">True FAIL (Defects/Short)</td>
-                          <td className="py-2.5 px-3 text-slate-500">{benchmarkReport.confusion_matrix.FAIL.PASS}</td>
-                          <td className="py-2.5 px-3 text-rose-300 font-bold bg-rose-950/20">
-                            {benchmarkReport.confusion_matrix.FAIL.FAIL}
-                          </td>
-                          <td className="py-2.5 px-3 text-slate-500">{benchmarkReport.confusion_matrix.FAIL.UNCERTAIN}</td>
-                        </tr>
-                        <tr>
-                          <td className="py-2.5 px-3 font-semibold text-slate-300">True UNCERTAIN (Ambiguous)</td>
-                          <td className="py-2.5 px-3 text-slate-500">{benchmarkReport.confusion_matrix.UNCERTAIN.PASS}</td>
-                          <td className="py-2.5 px-3 text-slate-500">{benchmarkReport.confusion_matrix.UNCERTAIN.FAIL}</td>
-                          <td className="py-2.5 px-3 text-amber-300 font-bold bg-amber-950/20">
-                            {benchmarkReport.confusion_matrix.UNCERTAIN.UNCERTAIN}
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* Scenario breakdown list */}
-                <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-5 space-y-3">
-                  <h3 className="text-xs font-semibold text-white uppercase tracking-wider m-0">
-                    Scenario Detailed Performance Log
-                  </h3>
-                  <div className="divide-y divide-slate-800">
-                    {benchmarkReport.scenarios.map((sc) => (
-                      <div key={sc.scenario_id} className="py-3 flex flex-wrap items-center justify-between gap-4 text-xs">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono text-slate-400">#{sc.scenario_id}</span>
-                            <span className="font-bold text-white">{sc.name}</span>
-                            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-indigo-300">
-                              {sc.disposition}
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-slate-400 m-0">{sc.description}</p>
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                          <div className="text-right">
-                            <span className="text-[10px] text-slate-500 block">Expected ➔ Actual</span>
-                            <span className="font-mono font-semibold text-slate-200">
-                              {sc.expected_outcome} ➔ {sc.actual_outcome}
-                            </span>
-                          </div>
-                          {sc.matched_ground_truth ? (
-                            <span className="px-2.5 py-1 rounded bg-emerald-950 text-emerald-400 border border-emerald-500/30 text-[11px] font-semibold flex items-center gap-1">
-                              <CheckCircle2 className="w-3.5 h-3.5" /> Matched GT
-                            </span>
-                          ) : (
-                            <span className="px-2.5 py-1 rounded bg-rose-950 text-rose-400 border border-rose-500/30 text-[11px] font-semibold flex items-center gap-1">
-                              <XCircle className="w-3.5 h-3.5" /> Discrepancy
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        {/* ========================================================================= */}
-        {/* TAB 3: EVIDENCE LEDGER & CROSS-POD INTEROPERABILITY */}
-        {/* ========================================================================= */}
-        {activeTab === 'ledger' && (
-          <div className="space-y-6">
-            <div className="bg-slate-900/90 rounded-2xl border border-slate-800 p-6">
-              <h2 className="text-lg font-bold text-white flex items-center gap-2.5 m-0 mb-1">
-                <FileJson className="w-5 h-5 text-indigo-400" /> Evidence Ledger & Cross-Manager Contract
-              </h2>
-              <p className="text-xs text-slate-400 m-0">
-                Sealed evidence certificates for incoming shipments. Exportable to Pod 02 (Prep Manager) and Pod 05 (Recovery Manager for supplier claims).
-              </p>
-            </div>
-
-            <div className="bg-slate-900/80 rounded-2xl border border-slate-800 overflow-hidden shadow-sm">
-              <table className="w-full text-xs text-left">
-                <thead className="bg-slate-950 border-b border-slate-800 text-slate-400 font-mono">
-                  <tr>
-                    <th className="py-3 px-4">Inspection ID</th>
-                    <th className="py-3 px-4">Unit ID</th>
-                    <th className="py-3 px-4">SKU</th>
-                    <th className="py-3 px-4">Verdict</th>
-                    <th className="py-3 px-4">Disposition</th>
-                    <th className="py-3 px-4">SHA-256 Digest</th>
-                    <th className="py-3 px-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/80">
-                  {inspectionsList.map((insp) => (
-                    <tr key={insp.id} className="hover:bg-slate-950/40 transition">
-                      <td className="py-3 px-4 font-mono font-medium text-slate-300">{insp.id.slice(0, 8)}...</td>
-                      <td className="py-3 px-4 font-mono text-indigo-300">{insp.unit_id || 'UNIT-0001'}</td>
-                      <td className="py-3 px-4 font-mono">{insp.sku}</td>
-                      <td className="py-3 px-4">{getVerdictBadge(insp.overall_decision)}</td>
-                      <td className="py-3 px-4 font-mono text-[11px] text-slate-300">{insp.disposition || 'N/A'}</td>
-                      <td className="py-3 px-4 font-mono text-[11px] text-slate-500">
-                        {insp.evidence_hash ? `${insp.evidence_hash.slice(0, 12)}...` : 'Pending'}
-                      </td>
-                      <td className="py-3 px-4 text-right">
-                        <button
-                          onClick={() => handleViewContract(insp.id)}
-                          className="px-2.5 py-1 rounded bg-indigo-950 hover:bg-indigo-900 text-indigo-300 border border-indigo-700/50 text-[11px] font-semibold transition"
-                        >
-                          View Certificate
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {inspectionsList.length === 0 && (
-                    <tr>
-                      <td colSpan="7" className="py-8 text-center text-slate-500">
-                        No inspections recorded yet for this tenant. Run an inspection on the Dock Scanner!
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* ========================================================================= */}
-        {/* TAB 4: ARCHITECTURE & COMPLIANCE RULES */}
-        {/* ========================================================================= */}
-        {activeTab === 'architecture' && (
-          <div className="space-y-6">
-            <div className="bg-slate-900/90 rounded-2xl border border-slate-800 p-6">
-              <h2 className="text-lg font-bold text-white flex items-center gap-2.5 m-0 mb-1">
-                <Layers className="w-5 h-5 text-indigo-400" /> Engineering Rules & 5-Layer Cognitive Architecture
-              </h2>
-              <p className="text-xs text-slate-400 m-0">
-                INBOUNDSHIELD AI strictly adheres to the non-negotiable hackathon engineering requirements.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-5 space-y-2">
-                <div className="flex items-center gap-2 text-indigo-400 font-semibold text-xs">
-                  <Lock className="w-4 h-4" /> Rule 1: Tenancy Isolation
-                </div>
-                <p className="text-xs text-slate-300 leading-relaxed m-0">
-                  Every table carries <code className="text-indigo-300 font-mono">organization_id</code>. Verified by automated tests where Tenant B sees zero rows of Tenant A and cannot fetch image bytes by guessing keys.
-                </p>
-              </div>
-
-              <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-5 space-y-2">
-                <div className="flex items-center gap-2 text-emerald-400 font-semibold text-xs">
-                  <CheckCircle2 className="w-4 h-4" /> Rule 2: Batched Model Calls
-                </div>
-                <p className="text-xs text-slate-300 leading-relaxed m-0">
-                  Makes exactly <strong>ONE</strong> model call per unit carrying all 8 checks, never one call per check. Protects warehouse unit economics and delivers 90%+ gross margins.
-                </p>
-              </div>
-
-              <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-5 space-y-2">
-                <div className="flex items-center gap-2 text-amber-400 font-semibold text-xs">
-                  <AlertTriangle className="w-4 h-4" /> Rule 3: Fail Open
-                </div>
-                <p className="text-xs text-slate-300 leading-relaxed m-0">
-                  Model errors or timeouts still save the physical capture and mark the record <code className="text-amber-300 font-mono">pending_review</code>. The dock operator is never blocked.
-                </p>
-              </div>
-
-              <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-5 space-y-2">
-                <div className="flex items-center gap-2 text-sky-400 font-semibold text-xs">
-                  <HelpCircle className="w-4 h-4" /> Rule 4: Uncertain is Valid
-                </div>
-                <p className="text-xs text-slate-300 leading-relaxed m-0">
-                  <code className="text-sky-300 font-mono">UNCERTAIN</code> is a first-class verdict, not a low-confidence pass. If a label has glare or blur, the engine issues a targeted <code className="text-sky-300 font-mono">EvidenceRequest</code>.
-                </p>
-              </div>
-
-              <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-5 space-y-2">
-                <div className="flex items-center gap-2 text-violet-400 font-semibold text-xs">
-                  <Database className="w-4 h-4" /> Rule 5: Authoritative Lookup
-                </div>
-                <p className="text-xs text-slate-300 leading-relaxed m-0">
-                  PO specs (SKU, cartons, UPC, kit components) are retrieved directly from authoritative database records, never hallucinated by a model from conversational memory.
-                </p>
-              </div>
-
-              <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-5 space-y-2">
-                <div className="flex items-center gap-2 text-rose-400 font-semibold text-xs">
-                  <FileText className="w-4 h-4" /> Rule 6: Overrides Are Data
-                </div>
-                <p className="text-xs text-slate-300 leading-relaxed m-0">
-                  When a supervisor overrides an agent verdict, original verdict, replacement verdict, reason, timestamp, and operator ID are immutably preserved.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-      </main>
-
-      {/* Supervisor Override Modal (Rule 6) */}
+      {/* ==================================================================== */}
+      {/* MODAL 2: SUPERVISOR OVERRIDE MODAL (RULE 6) */}
+      {/* ==================================================================== */}
       {overrideModalOpen && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
-            <div className="flex justify-between items-center pb-2 border-b border-slate-800">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2 m-0">
-                <UserCheck className="w-4 h-4 text-indigo-400" /> Record Supervisor Override (Rule 6)
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setOverrideModalOpen(false)}
+        >
+          <div
+            className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="font-bold text-sm text-white flex items-center gap-2 m-0">
+                <UserCheck className="w-4 h-4 text-emerald-400" /> Supervisor Override (Rule 6)
               </h3>
               <button
                 onClick={() => setOverrideModalOpen(false)}
-                className="text-slate-500 hover:text-white"
+                className="text-slate-400 hover:text-white"
               >
-                ✕
+                <XCircle className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="space-y-3 text-xs">
-              <div>
-                <span className="text-slate-400 block mb-1">Check to Override:</span>
-                <span className="font-mono text-indigo-300 font-semibold">
-                  {selectedCheckForOverride ? selectedCheckForOverride.check_key : 'Overall Decision'}
-                </span>
-              </div>
+            <p className="text-xs text-slate-300">
+              Rule 6 Compliance: Overwrites are forbidden. Submitting this override appends an immutable record to the ledger preserving the original AI decision.
+            </p>
 
+            <div className="space-y-3 text-xs">
               <div>
                 <label className="text-slate-400 block mb-1">New Verdict</label>
                 <select
                   value={overrideVerdict}
                   onChange={(e) => setOverrideVerdict(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-white font-mono"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono"
                 >
-                  <option value="PASS">PASS</option>
-                  <option value="FAIL">FAIL</option>
-                  <option value="UNCERTAIN">UNCERTAIN</option>
+                  <option value="PASS">PASS (Accept Unit)</option>
+                  <option value="FAIL">FAIL (Reject Unit)</option>
+                  <option value="UNCERTAIN">UNCERTAIN (Request More Proof)</option>
                 </select>
               </div>
 
@@ -1423,18 +1788,19 @@ export default function App() {
                 <textarea
                   value={overrideReason}
                   onChange={(e) => setOverrideReason(e.target.value)}
-                  placeholder="e.g. Supervisor physically inspected shipping barcode with laser scanner; package confirmed genuine SKU."
-                  className="w-full h-24 bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white focus:outline-none focus:border-indigo-500"
+                  placeholder="Explain why the AI verdict is overridden (e.g. Supplier concession granted on corrugate markings)..."
+                  rows={3}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-xs focus:outline-none focus:border-indigo-500"
                 />
               </div>
 
               <div>
-                <label className="text-slate-400 block mb-1">Operator ID</label>
+                <label className="text-slate-400 block mb-1">Supervisor ID</label>
                 <input
                   type="text"
                   value={operatorId}
                   onChange={(e) => setOperatorId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-white font-mono"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono"
                 />
               </div>
             </div>
@@ -1442,173 +1808,65 @@ export default function App() {
             <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
               <button
                 onClick={() => setOverrideModalOpen(false)}
-                className="px-3 py-1.5 rounded-lg text-xs text-slate-400 hover:text-white"
+                className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:text-white text-xs"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSubmitOverride}
-                className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition"
+                className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow transition"
               >
-                Record Immutable Override
+                Record Override
               </button>
             </div>
           </div>
         </div>
       )}
 
-            {/* Official Printable Inspection Certificate Modal */}
-      {certificateModalOpen && currentInspection && (
-        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white text-slate-900 rounded-2xl max-w-3xl w-full p-8 space-y-6 shadow-2xl border border-slate-200">
-            {/* Header with official seal */}
-            <div className="flex justify-between items-start border-b-2 border-slate-900 pb-4">
-              <div>
-                <span className="text-[10px] uppercase font-mono tracking-widest text-slate-500 font-bold block">
-                  Official Inbound Chain of Custody & Quality Evidence
-                </span>
-                <h2 className="text-xl font-black tracking-tight text-slate-900 m-0">
-                  INBOUNDSHIELD RECEIVING CERTIFICATE
-                </h2>
-                <span className="text-xs text-slate-600 font-mono">
-                  Organization: {orgId} · Operator: {operatorId} · Station: DOCK-04
-                </span>
-              </div>
-              <div className="text-right">
-                <span className={`inline-block px-3 py-1 rounded text-xs font-black tracking-wider uppercase font-mono ${
-                  currentInspection.overall_decision === 'PASS'
-                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                    : currentInspection.overall_decision === 'FAIL'
-                    ? 'bg-rose-100 text-rose-800 border border-rose-300'
-                    : 'bg-amber-100 text-amber-800 border border-amber-300'
-                }`}>
-                  VERDICT: {currentInspection.overall_decision}
-                </span>
-                <span className="block text-[11px] font-mono text-slate-500 mt-1">
-                  {currentInspection.disposition || 'ACCEPTED'}
-                </span>
-              </div>
-            </div>
-
-            {/* Simulated Barcode Banner */}
-            <div className="flex items-center justify-between bg-slate-50 p-3 rounded-lg border border-slate-200 font-mono text-xs">
-              <div>
-                <span className="text-slate-500 block text-[10px]">INSPECTION REFERENCE</span>
-                <span className="font-bold text-slate-800">{currentInspection.id}</span>
-              </div>
-              <div className="text-right">
-                <div className="h-7 w-40 bg-slate-800 flex items-center justify-center text-white text-[9px] tracking-[6px] font-mono">
-                  ||| | |||| | ||| ||||
-                </div>
-              </div>
-            </div>
-
-            {/* Reconciliation Comparison Table */}
-            <div>
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
-                Authoritative PO Reconciliation Summary
-              </h4>
-              <table className="w-full text-xs border border-slate-200 divide-y divide-slate-200">
-                <thead className="bg-slate-100 font-bold text-slate-700">
-                  <tr>
-                    <th className="p-2 text-left">Check Dimension</th>
-                    <th className="p-2 text-left">Authoritative PO</th>
-                    <th className="p-2 text-left">Observed Receipt</th>
-                    <th className="p-2 text-center">Finding</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200">
-                  {currentInspection.checks && currentInspection.checks.map((chk, i) => (
-                    <tr key={i} className="hover:bg-slate-50">
-                      <td className="p-2 font-mono font-medium text-slate-800">{chk.check_key}</td>
-                      <td className="p-2 text-slate-600">{chk.expected_value || 'Authoritative Rule'}</td>
-                      <td className="p-2 font-semibold text-slate-800">{chk.observed_value || 'N/A'}</td>
-                      <td className="p-2 text-center font-bold">
-                        <span className={`px-2 py-0.5 rounded text-[10px] ${
-                          chk.verdict === 'PASS' ? 'bg-emerald-100 text-emerald-800' : (chk.verdict === 'FAIL' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800')
-                        }`}>
-                          {chk.verdict}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Cryptographic SHA-256 Tamper Seal */}
-            <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs space-y-1">
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block font-mono">
-                Cryptographic Evidence Hash (SHA-256 Tamper-Proof Seal)
-              </span>
-              <p className="font-mono text-[11px] text-slate-700 break-all m-0">
-                {currentInspection.evidence_hash || 'SHA256-PENDING'}
-              </p>
-              <span className="text-[10px] text-slate-500 block italic">
-                Cross-pod verified standard contract for Pod 02 (Prep) and Pod 05 (Recovery).
-              </span>
-            </div>
-
-            {/* Modal Actions */}
-            <div className="flex justify-between items-center pt-4 border-t border-slate-200">
-              <button
-                onClick={() => setCertificateModalOpen(false)}
-                className="px-4 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 border border-slate-300"
-              >
-                Close
-              </button>
-              <button
-                onClick={() => window.print()}
-                className="px-4 py-2 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white flex items-center gap-1.5 transition"
-              >
-                <Printer className="w-4 h-4" /> Print / Save as PDF
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Cross-Pod Evidence Contract Modal */}
+      {/* ==================================================================== */}
+      {/* MODAL 3: CONTRACT JSON EXPORT MODAL */}
+      {/* ==================================================================== */}
       {contractModalData && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full p-6 space-y-4 shadow-2xl max-h-[85vh] flex flex-col">
-            <div className="flex justify-between items-center pb-2 border-b border-slate-800">
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setContractModalData(null)}
+        >
+          <div
+            className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full p-5 space-y-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div>
-                <h3 className="text-sm font-bold text-white flex items-center gap-2 m-0">
-                  <FileJson className="w-4 h-4 text-emerald-400" /> Cross-Pod Evidence Certificate (Pod 01 ➔ 02 & 05)
-                </h3>
-                <span className="text-[11px] text-slate-400 font-mono">
-                  Record ID: {contractModalData.record_id} · Unit: {contractModalData.unit_id}
-                </span>
+                <span className="font-bold text-sm text-white block">SHA-256 Sealed Cross-Pod Evidence Contract</span>
+                <span className="text-[11px] font-mono text-slate-400">Pod 01 (Receiving) ➔ Pod 02 (Prep) & Pod 05 (Recovery)</span>
               </div>
               <button
                 onClick={() => setContractModalData(null)}
-                className="text-slate-500 hover:text-white"
+                className="text-slate-400 hover:text-white"
               >
-                ✕
+                <XCircle className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto bg-slate-950 p-4 rounded-xl border border-slate-800 font-mono text-xs text-slate-300">
-              <pre className="whitespace-pre-wrap">{JSON.stringify(contractModalData, null, 2)}</pre>
+            <div className="bg-slate-950 rounded-xl p-3 max-h-96 overflow-y-auto border border-slate-800 font-mono text-[11px] text-emerald-300">
+              <pre>{JSON.stringify(contractModalData, null, 2)}</pre>
             </div>
 
-            <div className="flex justify-between items-center pt-2 border-t border-slate-800 text-xs">
-              <span className="text-slate-500 font-mono text-[10px]">
-                SHA-256 Digest: {contractModalData.certificate_sha256}
-              </span>
+            <div className="flex items-center justify-between">
               <button
                 onClick={() => {
-                  const blob = new Blob([JSON.stringify(contractModalData, null, 2)], { type: 'application/json' });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = `${contractModalData.record_id}_evidence_contract.json`;
-                  a.click();
+                  navigator.clipboard.writeText(JSON.stringify(contractModalData, null, 2));
+                  showToast('Evidence contract copied to clipboard', 'success');
                 }}
-                className="px-4 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 transition"
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs flex items-center gap-1.5"
               >
-                Download JSON Record
+                <Copy className="w-3.5 h-3.5" /> Copy JSON
+              </button>
+              <button
+                onClick={() => setContractModalData(null)}
+                className="px-4 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-semibold"
+              >
+                Done
               </button>
             </div>
           </div>

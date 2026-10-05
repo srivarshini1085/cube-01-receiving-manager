@@ -268,6 +268,11 @@ class ReceivingImage(Base):
         CHAR(36), ForeignKey("receiving_inspections.id"), nullable=False
     )
     file_reference: Mapped[str] = mapped_column(String(500), nullable=False)
+    storage_key: Mapped[str | None] = mapped_column(String(500))
+    image_url: Mapped[str | None] = mapped_column(Text)
+    original_filename: Mapped[str | None] = mapped_column(String(500))
+    content_type: Mapped[str | None] = mapped_column(String(100))
+    size_bytes: Mapped[int | None] = mapped_column(Integer)
     image_type: Mapped[str] = mapped_column(ImageType, nullable=False, default="other")
     checksum: Mapped[str | None] = mapped_column(String(64))
     metadata_json: Mapped[str | None] = mapped_column(Text)

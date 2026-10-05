@@ -55,7 +55,8 @@ class VisionAgent:
         expected_context: Optional[Dict[str, Any]] = None,
     ) -> VisionObservation:
         """
-        Processes all images for a given unit in ONE single batch call.
+        Processes all images for a given unit in ONE single batch call (Rule 2).
+        Delegates to VisionProvider (Gemini Multimodal or Perceptual CV).
         Extracts observations across all dimensions (SKU, damage, count, variant, components).
         """
         if not image_paths:
@@ -64,74 +65,36 @@ class VisionAgent:
                 confidence_scores={"overall": 0.0},
             )
 
-        # Analyze physical visual properties of all provided images
-        aggregated = {
-            "carton_damage": set(),
-            "unit_damage": set(),
-            "quality_issues": set(),
-            "detected_components": set(),
-            "detected_skus": set(),
-            "detected_asins": set(),
-            "detected_colours": set(),
-            "detected_variants": set(),
-            "estimated_cartons": None,
-            "estimated_upc": None,
-            "confidences": {},
-        }
-
-        # Analyze each image using perceptual computer vision algorithms
-        for path in image_paths:
-            img_obs = self._analyze_single_image(path, expected_context)
-            for d in img_obs.get("carton_damage", []):
-                aggregated["carton_damage"].add(d)
-            for d in img_obs.get("unit_damage", []):
-                aggregated["unit_damage"].add(d)
-            for q in img_obs.get("quality_issues", []):
-                aggregated["quality_issues"].add(q)
-            for c in img_obs.get("components", []):
-                aggregated["detected_components"].add(c)
-            if img_obs.get("sku"):
-                aggregated["detected_skus"].add(img_obs["sku"])
-            if img_obs.get("asin"):
-                aggregated["detected_asins"].add(img_obs["asin"])
-            if img_obs.get("colour"):
-                aggregated["detected_colours"].add(img_obs["colour"])
-            if img_obs.get("variant"):
-                aggregated["detected_variants"].add(img_obs["variant"])
-            if img_obs.get("carton_count"):
-                aggregated["estimated_cartons"] = img_obs["carton_count"]
-            if img_obs.get("upc"):
-                aggregated["estimated_upc"] = img_obs["upc"]
-
-        # Synthesize batched observation
-        detected_sku = next(iter(aggregated["detected_skus"]), None)
-        detected_asin = next(iter(aggregated["detected_asins"]), None)
-        detected_colour = next(iter(aggregated["detected_colours"]), None)
-        detected_variant = next(iter(aggregated["detected_variants"]), None)
+        from app.agents.vision_provider import get_vision_provider
+        provider = get_vision_provider()
+        structured = provider.analyze_receiving_inspection(
+            po_context=expected_context or {},
+            image_paths=image_paths,
+            unit_id=unit_id,
+        )
 
         return VisionObservation(
-            detected_sku=detected_sku,
-            detected_asin=detected_asin,
-            detected_colour=detected_colour,
-            detected_variant=detected_variant,
-            detected_components=list(aggregated["detected_components"]),
-            estimated_cartons=aggregated["estimated_cartons"],
-            estimated_units_per_carton=aggregated["estimated_upc"],
-            carton_damage_types=list(aggregated["carton_damage"]),
-            unit_damage_types=list(aggregated["unit_damage"]),
-            image_quality_issues=list(aggregated["quality_issues"]),
+            detected_sku=structured.identity.observed_sku,
+            detected_asin=structured.identity.observed_asin,
+            detected_colour=structured.variant.observed_colour,
+            detected_variant=structured.variant.observed_variant,
+            detected_components=structured.components.observed_components,
+            estimated_cartons=structured.quantity.observed_cartons,
+            estimated_units_per_carton=structured.quantity.observed_units_per_carton,
+            carton_damage_types=structured.damage.carton_damage,
+            unit_damage_types=structured.damage.unit_damage,
+            image_quality_issues=structured.quality_flags,
             confidence_scores={
-                "sku_confidence": 0.95 if detected_sku else 0.4,
-                "damage_confidence": 0.92,
-                "variant_confidence": 0.90 if detected_colour else 0.5,
-                "overall": 0.92 if not aggregated["quality_issues"] else 0.65,
+                "sku_confidence": structured.identity.confidence,
+                "damage_confidence": structured.damage.confidence,
+                "variant_confidence": structured.variant.confidence,
+                "overall": 0.92 if not structured.quality_flags else 0.65,
             },
             raw_observations={
-                "processed_image_count": len(image_paths),
-                "aggregated_data": {
-                    k: list(v) if isinstance(v, set) else v
-                    for k, v in aggregated.items()
-                },
+                "provider": structured.provider_name,
+                "model_version": structured.model_version,
+                "latency_ms": structured.latency_ms,
+                "uncertainties": structured.uncertainties,
             },
         )
 
